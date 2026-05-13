@@ -171,4 +171,26 @@ describe('task composer', () => {
     });
     expect(screen.queryByText('Yesterday urgent task')).not.toBeOnTheScreen();
   });
+
+  test('keeps the current day history entry updated automatically', async () => {
+    render(<App />);
+
+    fireEvent.press(await screen.findByTestId('quadrant-q2-empty-add-zone'));
+    fireEvent.changeText(await screen.findByLabelText('Task name'), 'Live history task');
+    fireEvent.press(screen.getByRole('button', { name: 'Add task' }));
+
+    await waitFor(async () => {
+      const rawHistory = await AsyncStorage.getItem(HISTORY_KEY);
+      expect(JSON.parse(rawHistory)).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          dayKey: dayKeyForOffset(0),
+          tasks: expect.objectContaining({
+            q2: expect.arrayContaining([
+              expect.objectContaining({ text: 'Live history task' }),
+            ]),
+          }),
+        }),
+      ]));
+    });
+  });
 });
