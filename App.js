@@ -36,13 +36,17 @@ const DRAG_POINT_EPSILON = 1.25;
 const LONG_TASK_TEXT_LENGTH = 34;
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 const INK = '#161616';
+const APP_SURFACE = '#F7F7F4';
+const PANEL_SURFACE = '#FAFAF8';
+const HAIRLINE_DARK = 'rgba(22,22,22,0.12)';
+const OVERLAY_TINT = 'rgba(22,22,22,0.06)';
 const DROP_GUIDE = '#F4C430';
 const DANGER = '#D94A3A';
 const DANGER_SOFT = 'rgba(217,74,58,0.16)';
 const DRAWER_SWIPE_TRIGGER = 72;
 const DRAWER_CLOSE_TRIGGER = 38;
-const DRAWER_WIDTH = 64;
-const DRAWER_HEIGHT = 216;
+const DRAWER_WIDTH = 58;
+const DRAWER_HEIGHT = 176;
 const DRAWER_OFFSET = DRAWER_WIDTH + 18;
 
 const MOTION = {
@@ -375,7 +379,7 @@ const QuadrantTile = memo(function QuadrantTile({
         { backgroundColor: color.bg },
       ]}
     >
-      <View style={[styles.tileHead, isTopTile && { paddingTop: 11 + topInset }]}>
+      <View style={[styles.tileHead, isTopTile && { paddingTop: 12 + topInset }]}>
         <View style={styles.tileHeadTop}>
           <Text style={[styles.tileTitle, { color: color.fg }]} numberOfLines={2}>{q.title}</Text>
         </View>
@@ -1315,13 +1319,13 @@ const styles = StyleSheet.create({
   },
   loading: {
     flex: 1,
-    backgroundColor: '#f5f5f3',
+    backgroundColor: APP_SURFACE,
   },
   shell: {
     flex: 1,
     width: '100%',
     maxWidth: 430,
-    backgroundColor: '#f5f5f3',
+    backgroundColor: APP_SURFACE,
     overflow: 'hidden',
   },
   safeLayer: {
@@ -1332,7 +1336,7 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     flexWrap: 'wrap',
-    backgroundColor: '#f5f5f3',
+    backgroundColor: APP_SURFACE,
   },
   tile: {
     width: '50%',
@@ -1375,14 +1379,14 @@ const styles = StyleSheet.create({
   },
   dropInsertMarkerFloating: {
     position: 'absolute',
-    left: 7,
-    right: 7,
+    left: 10,
+    right: 10,
     height: 10,
     justifyContent: 'center',
     zIndex: 4,
   },
   dropInsertLine: {
-    height: 2,
+    height: 2.5,
     borderRadius: 1,
     backgroundColor: INK,
   },
@@ -1390,12 +1394,12 @@ const styles = StyleSheet.create({
     opacity: 0.72,
   },
   tileHead: {
-    paddingTop: 11,
-    paddingHorizontal: 13,
-    paddingBottom: 6,
+    paddingTop: 12,
+    paddingHorizontal: 14,
+    paddingBottom: 7,
   },
   tileHeadTop: {
-    minHeight: 42,
+    minHeight: 40,
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
@@ -1404,13 +1408,13 @@ const styles = StyleSheet.create({
   tileTitle: {
     flex: 1,
     fontFamily: 'Nunito_800ExtraBold',
-    fontSize: 13,
-    lineHeight: 16,
+    fontSize: 14,
+    lineHeight: 17,
   },
   tileDesc: {
     fontFamily: 'Nunito_700Bold',
-    fontSize: 9,
-    lineHeight: 12,
+    fontSize: 9.5,
+    lineHeight: 12.5,
     marginTop: 2,
   },
   tileTasks: {
@@ -1421,11 +1425,11 @@ const styles = StyleSheet.create({
   },
   tileTasksContent: {
     flexGrow: 1,
-    paddingHorizontal: 7,
-    paddingBottom: 9,
+    paddingHorizontal: 8,
+    paddingBottom: 10,
   },
   miniTask: {
-    minHeight: 42,
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -1434,36 +1438,36 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(128,128,128,0.16)',
   },
   miniTaskRoomy: {
-    paddingVertical: 3,
+    paddingVertical: 4,
   },
   dragSource: {
     opacity: 0.24,
   },
   checkHit: {
-    width: 42,
-    height: 42,
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
   },
   checkCircle: {
-    width: 15,
-    height: 15,
-    borderRadius: 2,
-    borderWidth: 1.5,
+    width: 16,
+    height: 16,
+    borderRadius: 3,
+    borderWidth: 1.4,
     alignItems: 'center',
     justifyContent: 'center',
   },
   miniText: {
     width: '100%',
-    paddingRight: 6,
+    paddingRight: 7,
     fontFamily: 'Nunito_600SemiBold',
-    fontSize: 11,
-    lineHeight: 15,
+    fontSize: 11.5,
+    lineHeight: 16,
     textAlignVertical: 'center',
   },
   miniDragArea: {
     flex: 1,
-    minHeight: 42,
+    minHeight: 44,
     justifyContent: 'center',
   },
   miniDragAreaRoomy: {
@@ -1504,16 +1508,16 @@ const styles = StyleSheet.create({
     position: 'absolute',
     zIndex: 25,
     width: 240,
-    minHeight: 42,
-    borderRadius: 12,
+    minHeight: 44,
+    borderRadius: 10,
     borderWidth: 1,
     paddingHorizontal: 13,
     paddingVertical: 10,
     shadowColor: INK,
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 2,
+    shadowOpacity: 0.06,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 1,
   },
   dragGhostText: {
     fontFamily: 'Nunito_800ExtraBold',
@@ -1525,8 +1529,8 @@ const styles = StyleSheet.create({
     left: 16,
     right: 16,
     bottom: 14,
-    minHeight: 50,
-    borderRadius: 16,
+    minHeight: 52,
+    borderRadius: 14,
     backgroundColor: INK,
     paddingLeft: 15,
     paddingRight: 8,
@@ -1541,9 +1545,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   undoButton: {
-    minHeight: 42,
+    minHeight: 44,
     paddingHorizontal: 14,
-    borderRadius: 13,
+    borderRadius: 10,
     backgroundColor: '#fff',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1556,11 +1560,11 @@ const styles = StyleSheet.create({
   drawerLayer: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 40,
-    elevation: 14,
+    elevation: 12,
   },
   drawerBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'transparent',
+    backgroundColor: OVERLAY_TINT,
   },
   drawerBackdropPressable: {
     ...StyleSheet.absoluteFillObject,
@@ -1568,68 +1572,72 @@ const styles = StyleSheet.create({
   drawerPanel: {
     position: 'absolute',
     top: '50%',
-    right: 10,
+    right: 12,
     width: DRAWER_WIDTH,
     height: DRAWER_HEIGHT,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: PANEL_SURFACE,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(22,22,22,0.18)',
-    borderRadius: 8,
-    paddingVertical: 8,
+    borderColor: HAIRLINE_DARK,
+    borderRadius: 12,
+    paddingVertical: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    gap: 9,
+    shadowColor: INK,
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
   },
   drawerIconButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 8,
+    width: 46,
+    height: 46,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(22,22,22,0.14)',
+    borderColor: 'rgba(22,22,22,0.10)',
   },
   drawerIconButtonActive: {
     backgroundColor: DROP_GUIDE,
     borderColor: DROP_GUIDE,
   },
   drawerIconButtonPressed: {
-    opacity: 0.58,
+    opacity: 0.68,
   },
   todayIcon: {
-    width: 22,
-    height: 22,
+    width: 21,
+    height: 21,
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 4,
+    gap: 3,
   },
   todayIconCell: {
     width: 9,
     height: 9,
-    borderWidth: 1.4,
+    borderWidth: 1.3,
     borderColor: INK,
   },
   historyIcon: {
-    width: 25,
-    height: 25,
-    borderRadius: 13,
-    borderWidth: 1.6,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 1.4,
     borderColor: INK,
     alignItems: 'center',
     justifyContent: 'center',
   },
   historyIconHour: {
     position: 'absolute',
-    width: 1.6,
+    width: 1.4,
     height: 7,
     backgroundColor: INK,
     top: 6,
-    left: 11,
+    left: 11.3,
   },
   historyIconMinute: {
     position: 'absolute',
     width: 7,
-    height: 1.6,
+    height: 1.4,
     backgroundColor: INK,
     top: 12,
     left: 11,
@@ -1643,7 +1651,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 7,
     width: 11,
-    height: 1.8,
+    height: 1.6,
     borderRadius: 1,
     backgroundColor: INK,
   },
@@ -1656,11 +1664,11 @@ const styles = StyleSheet.create({
     bottom: 8,
   },
   drawerHistoryEmpty: {
-    width: 48,
-    height: 92,
-    borderRadius: 8,
+    width: 46,
+    height: 82,
+    borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(22,22,22,0.14)',
+    borderColor: 'rgba(22,22,22,0.10)',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
@@ -1680,49 +1688,54 @@ const styles = StyleSheet.create({
   },
   composerBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(22,22,22,0.08)',
+    backgroundColor: 'rgba(22,22,22,0.10)',
   },
   composerKeyboard: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'flex-end',
   },
   composerPanel: {
-    marginHorizontal: 12,
+    marginHorizontal: 10,
     marginBottom: COMPOSER_BOTTOM_GAP,
-    borderRadius: 16,
+    borderRadius: 18,
     borderWidth: 1,
-    padding: 12,
+    padding: 14,
     width: 'auto',
+    shadowColor: INK,
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 5,
   },
   composerTitle: {
     fontFamily: 'Nunito_800ExtraBold',
-    fontSize: 14,
-    lineHeight: 18,
+    fontSize: 15,
+    lineHeight: 19,
   },
   composerDesc: {
     fontFamily: 'Nunito_700Bold',
-    fontSize: 10,
-    lineHeight: 13,
+    fontSize: 10.5,
+    lineHeight: 14,
     marginTop: 1,
-    marginBottom: 9,
+    marginBottom: 10,
   },
   composerRow: {
     flexDirection: 'column',
     alignItems: 'stretch',
-    gap: 8,
+    gap: 9,
   },
   addInput: {
     width: '100%',
-    height: 42,
-    borderRadius: 13,
-    paddingHorizontal: 13,
+    minHeight: 44,
+    borderRadius: 12,
+    paddingHorizontal: 14,
     fontFamily: 'Nunito_600SemiBold',
-    fontSize: 13,
+    fontSize: 14,
   },
   addButton: {
     width: '100%',
-    height: 42,
-    borderRadius: 8,
+    height: 44,
+    borderRadius: 10,
     paddingHorizontal: 12,
     alignItems: 'center',
     justifyContent: 'center',
