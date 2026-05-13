@@ -1299,9 +1299,7 @@ function EisenhowerApp() {
   const activeComposer = composer ? QUADS.find(q => q.id === composer.qid) : null;
   const activeComposerColor = composer ? COLORS[composer.qid] : null;
   const composerMode = composer?.taskId ? 'Edit task' : 'New task';
-  const displayHistory = useMemo(() => (
-    upsertHistoryEntry(history, createHistoryEntry(activeDay, tasks))
-  ), [activeDay, history, tasks]);
+  const displayHistory = upsertHistoryEntry(history, createHistoryEntry(activeDay, tasks));
   const shellWidth = shellRect.current.width || Math.min(windowWidth || 430, 430);
   const dragGhostWidth = Math.max(132, Math.min(172, shellWidth / 2 - 28));
 
