@@ -38,9 +38,9 @@ const INK = '#1A1A1A';
 const DROP_GUIDE = '#FFDD66';
 const DANGER = '#E5483E';
 const DANGER_SOFT = 'rgba(229,72,62,0.18)';
-const EDGE_SWIPE_WIDTH = 32;
-const EDGE_SWIPE_ZONE_WIDTH = 92;
-const EDGE_SWIPE_SYSTEM_GAP = 12;
+const EDGE_SWIPE_WIDTH = 54;
+const EDGE_SWIPE_ZONE_WIDTH = 126;
+const EDGE_SWIPE_SYSTEM_GAP = 0;
 const EDGE_SWIPE_TRIGGER = 34;
 const EDGE_DRAWER_MAX_WIDTH = 224;
 const EDGE_DRAWER_MIN_WIDTH = 184;
@@ -1094,14 +1094,19 @@ function EisenhowerApp() {
           </Animated.View>
         )}
 
+        </View>
+
         <Pressable
-          accessible={false}
+          accessibilityLabel="Open drawer"
+          accessibilityRole="button"
           testID="edge-drawer-hitbox"
           pointerEvents={drawerOpen || dragging || composer ? 'none' : 'auto'}
           onPress={openDrawer}
+          onPressIn={openDrawer}
           style={styles.edgeDrawerHitbox}
-        />
-        </View>
+        >
+          <View style={styles.edgeDrawerHandle} />
+        </Pressable>
 
         {drawerOpen && (
           <SafeAreaView testID="edge-drawer" style={styles.drawerLayer} edges={['top', 'bottom', 'right']}>
@@ -1550,11 +1555,23 @@ const styles = StyleSheet.create({
     right: EDGE_SWIPE_SYSTEM_GAP,
     bottom: 0,
     width: EDGE_SWIPE_WIDTH,
-    zIndex: 12,
+    zIndex: 38,
+    elevation: 12,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  edgeDrawerHandle: {
+    width: 4,
+    height: 76,
+    borderTopLeftRadius: 4,
+    borderBottomLeftRadius: 4,
+    backgroundColor: DROP_GUIDE,
+    opacity: 0.78,
   },
   drawerLayer: {
     ...StyleSheet.absoluteFillObject,
-    zIndex: 18,
+    zIndex: 40,
+    elevation: 14,
   },
   drawerBackdrop: {
     ...StyleSheet.absoluteFillObject,
