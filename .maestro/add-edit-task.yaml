@@ -1,0 +1,54 @@
+# Add and edit task keyboard flow
+#
+# Prerequisites:
+# - Android device/emulator has the preview APK installed.
+# - Run from mobile/: maestro test .maestro/add-edit-task.yaml
+
+appId: com.iwantto314.eisenhower
+tags:
+  - smoke
+  - keyboard
+---
+- launchApp
+
+- extendedWaitUntil:
+    visible:
+      id: "quadrant-q2-empty-add-zone"
+    timeout: 10000
+
+- tapOn:
+    id: "quadrant-q2-empty-add-zone"
+
+- extendedWaitUntil:
+    visible:
+      id: "task-composer-input"
+    timeout: 5000
+
+- inputText: "Maestro add task"
+
+- tapOn:
+    id: "task-composer-save"
+
+- extendedWaitUntil:
+    visible: "Maestro add task"
+    timeout: 5000
+
+- tapOn: "Maestro add task"
+
+- extendedWaitUntil:
+    visible:
+      id: "task-composer-input"
+    timeout: 5000
+
+- eraseText
+- inputText: "Maestro edited task"
+
+- tapOn:
+    id: "task-composer-save"
+
+- extendedWaitUntil:
+    visible: "Maestro edited task"
+    timeout: 5000
+
+- hideKeyboard
+- takeScreenshot: add-edit-task-final
