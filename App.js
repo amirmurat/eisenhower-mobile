@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFonts } from 'expo-font';
 import { StatusBar } from 'expo-status-bar';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -45,8 +46,8 @@ const DANGER = '#D94A3A';
 const DANGER_SOFT = 'rgba(217,74,58,0.16)';
 const DRAWER_SWIPE_TRIGGER = 72;
 const DRAWER_CLOSE_TRIGGER = 38;
-const DRAWER_WIDTH = 58;
-const DRAWER_HEIGHT = 176;
+const DRAWER_WIDTH = 60;
+const DRAWER_HEIGHT = 188;
 const DRAWER_OFFSET = DRAWER_WIDTH + 18;
 
 const MOTION = {
@@ -88,33 +89,24 @@ const TASK_DIVIDER_COLORS = {
   q4: 'rgba(22,22,22,0.10)',
 };
 
+function DrawerIcon({ name, size = 23 }) {
+  return <Ionicons name={name} size={size} color={INK} />;
+}
+
 function TodayIcon() {
-  return (
-    <View style={styles.todayIcon}>
-      <View style={styles.todayIconCell} />
-      <View style={styles.todayIconCell} />
-      <View style={styles.todayIconCell} />
-      <View style={styles.todayIconCell} />
-    </View>
-  );
+  return <DrawerIcon name="today-outline" />;
 }
 
 function HistoryIcon() {
-  return (
-    <View style={styles.historyIcon}>
-      <View style={styles.historyIconHour} />
-      <View style={styles.historyIconMinute} />
-    </View>
-  );
+  return <DrawerIcon name="time-outline" size={24} />;
+}
+
+function SettingsIcon() {
+  return <DrawerIcon name="settings-outline" size={24} />;
 }
 
 function BackIcon() {
-  return (
-    <View style={styles.backIcon}>
-      <View style={[styles.backIconLine, styles.backIconLineTop]} />
-      <View style={[styles.backIconLine, styles.backIconLineBottom]} />
-    </View>
-  );
+  return <DrawerIcon name="chevron-back-outline" size={25} />;
 }
 
 function getNextId(tasks) {
@@ -1141,19 +1133,19 @@ function EisenhowerApp() {
             </Reanimated.View>
             <GestureDetector gesture={closeDrawerGesture}>
               <Reanimated.View testID="drawer-panel" style={[styles.drawerPanel, drawerPanelStyle]}>
-                {drawerView === 'history' ? (
+                {drawerView !== 'menu' ? (
                   <>
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel="Back to drawer menu"
-                      testID="drawer-history-back"
+                      testID={`drawer-${drawerView}-back`}
                       onPress={() => setDrawerView('menu')}
                       style={({ pressed }) => [styles.drawerIconButton, pressed && styles.drawerIconButtonPressed]}
                     >
                       <BackIcon />
                     </Pressable>
-                    <View testID="drawer-history-empty" style={styles.drawerHistoryEmpty}>
-                      <HistoryIcon />
+                    <View testID={`drawer-${drawerView}-empty`} style={styles.drawerPreview}>
+                      {drawerView === 'history' ? <HistoryIcon /> : <SettingsIcon />}
                       <View style={styles.drawerHistoryLine} />
                       <View style={[styles.drawerHistoryLine, styles.drawerHistoryLineShort]} />
                     </View>
@@ -1177,6 +1169,15 @@ function EisenhowerApp() {
                       style={({ pressed }) => [styles.drawerIconButton, pressed && styles.drawerIconButtonPressed]}
                     >
                       <HistoryIcon />
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Show settings"
+                      testID="drawer-settings-action"
+                      onPress={() => setDrawerView('settings')}
+                      style={({ pressed }) => [styles.drawerIconButton, pressed && styles.drawerIconButtonPressed]}
+                    >
+                      <SettingsIcon />
                     </Pressable>
                   </>
                 )}
@@ -1579,10 +1580,10 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: HAIRLINE_DARK,
     borderRadius: 12,
-    paddingVertical: 10,
+    paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 9,
+    gap: 8,
     shadowColor: INK,
     shadowOpacity: 0.08,
     shadowRadius: 14,
@@ -1604,66 +1605,7 @@ const styles = StyleSheet.create({
   drawerIconButtonPressed: {
     opacity: 0.68,
   },
-  todayIcon: {
-    width: 21,
-    height: 21,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 3,
-  },
-  todayIconCell: {
-    width: 9,
-    height: 9,
-    borderWidth: 1.3,
-    borderColor: INK,
-  },
-  historyIcon: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 1.4,
-    borderColor: INK,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  historyIconHour: {
-    position: 'absolute',
-    width: 1.4,
-    height: 7,
-    backgroundColor: INK,
-    top: 6,
-    left: 11.3,
-  },
-  historyIconMinute: {
-    position: 'absolute',
-    width: 7,
-    height: 1.4,
-    backgroundColor: INK,
-    top: 12,
-    left: 11,
-  },
-  backIcon: {
-    width: 24,
-    height: 24,
-    justifyContent: 'center',
-  },
-  backIconLine: {
-    position: 'absolute',
-    left: 7,
-    width: 11,
-    height: 1.6,
-    borderRadius: 1,
-    backgroundColor: INK,
-  },
-  backIconLineTop: {
-    transform: [{ rotate: '-42deg' }],
-    top: 8,
-  },
-  backIconLineBottom: {
-    transform: [{ rotate: '42deg' }],
-    bottom: 8,
-  },
-  drawerHistoryEmpty: {
+  drawerPreview: {
     width: 46,
     height: 82,
     borderRadius: 10,
