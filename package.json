@@ -19,6 +19,7 @@
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
+    "react-native-gesture-handler": "~2.28.0",
     "react-native-keyboard-controller": "1.18.5",
     "react-native-reanimated": "~4.1.1",
     "react-native-safe-area-context": "~5.6.0",
@@ -28,6 +29,7 @@
   "private": true,
   "devDependencies": {
     "@testing-library/react-native": "^13.3.3",
+    "babel-preset-expo": "~54.0.10",
     "jest-expo": "~54.0.17",
     "react-test-renderer": "^19.1.0"
   },

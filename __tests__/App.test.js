@@ -123,8 +123,8 @@ describe('task composer', () => {
 
     const gestureLayer = await screen.findByTestId('matrix-gesture-layer');
 
-    expect(typeof gestureLayer.props.onMoveShouldSetResponderCapture).toBe('function');
-    expect(typeof gestureLayer.props.onResponderMove).toBe('function');
+    expect(gestureLayer).toBeOnTheScreen();
+    expect(screen.queryByTestId('edge-drawer')).not.toBeOnTheScreen();
     expect(screen.queryByTestId('edge-drawer-hitbox')).not.toBeOnTheScreen();
   });
 });

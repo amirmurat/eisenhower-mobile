@@ -1,6 +1,15 @@
+require('react-native-gesture-handler/jestSetup');
+
 jest.mock('expo-font', () => ({
   useFonts: () => [true],
 }));
+
+jest.mock('react-native-reanimated', () => {
+  const Reanimated = require('react-native-reanimated/mock');
+
+  Reanimated.default.call = () => {};
+  return Reanimated;
+});
 
 jest.mock('expo-status-bar', () => ({
   StatusBar: () => null,

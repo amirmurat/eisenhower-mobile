@@ -8,7 +8,6 @@ import {
   FlatList,
   InteractionManager,
   Keyboard,
-  PanResponder,
   Platform,
   Pressable,
   StyleSheet,
@@ -17,7 +16,9 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider, KeyboardStickyView } from 'react-native-keyboard-controller';
+import Reanimated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const STORAGE_KEY = 'eisenhower-mobile.tasks.v1';
@@ -42,6 +43,7 @@ const DRAWER_SWIPE_TRIGGER = 72;
 const DRAWER_CLOSE_TRIGGER = 38;
 const DRAWER_WIDTH = 64;
 const DRAWER_HEIGHT = 216;
+const DRAWER_OFFSET = DRAWER_WIDTH + 18;
 
 const MOTION = {
   enter: 150,
@@ -156,6 +158,11 @@ function getMoveIndexFromMarker(list, qid, markerIndex, currentDragging) {
 
   const targetLength = currentDragging?.from === qid ? Math.max(0, list.length - 1) : list.length;
   return Math.max(0, Math.min(targetLength, index));
+}
+
+function clamp01(value) {
+  'worklet';
+  return Math.max(0, Math.min(1, value));
 }
 
 function orderTasksByDone(list) {
@@ -476,7 +483,6 @@ function EisenhowerApp() {
   const pendingDragPoint = useRef(null);
   const lastHitTestAt = useRef(0);
   const lastGhostPoint = useRef(null);
-  const drawerGesture = useRef({ active: false, startX: 0, startY: 0 });
   const undoTimer = useRef(null);
   const persistTimer = useRef(null);
   const persistInteraction = useRef(null);
@@ -487,7 +493,7 @@ function EisenhowerApp() {
   const deleteHotAnim = useRef(new Animated.Value(0)).current;
   const trashAnim = useRef(new Animated.Value(0)).current;
   const undoAnim = useRef(new Animated.Value(0)).current;
-  const drawerAnim = useRef(new Animated.Value(0)).current;
+  const drawerProgress = useSharedValue(0);
 
   tasksRef.current = tasks;
 
@@ -709,79 +715,76 @@ function EisenhowerApp() {
     autoScrollFrame.current = requestAnimationFrame(runAutoScroll);
   };
 
-  const openDrawer = useCallback(() => {
-    if (drawerOpen) return;
-    Keyboard.dismiss();
-    drawerAnim.stopAnimation();
-    setDrawerOpen(true);
-    Animated.timing(drawerAnim, {
-      toValue: 1,
-      duration: MOTION.enter,
-      easing: MOTION.out,
-      useNativeDriver: true,
-    }).start();
-  }, [drawerAnim, drawerOpen]);
-
-  const closeDrawer = useCallback((animated = true) => {
-    drawerAnim.stopAnimation();
-    const finish = () => {
-      setDrawerOpen(false);
-      setDrawerView('menu');
-    };
-    if (!animated) {
-      drawerAnim.setValue(0);
-      finish();
-      return;
-    }
-    Animated.timing(drawerAnim, {
-      toValue: 0,
-      duration: MOTION.exit,
-      easing: MOTION.in,
-      useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (finished) finish();
-    });
-  }, [drawerAnim]);
-
-  const beginDrawerSwipe = event => {
-    const { pageX, pageY } = event.nativeEvent;
-    drawerGesture.current = { active: true, startX: pageX, startY: pageY };
-  };
-
-  const moveDrawerSwipe = event => {
-    const gesture = drawerGesture.current;
-    if (!gesture.active) return;
-    const { pageX, pageY } = event.nativeEvent;
-    const dx = pageX - gesture.startX;
-    const dy = pageY - gesture.startY;
-    if (dx >= DRAWER_CLOSE_TRIGGER && Math.abs(dy) < DRAWER_CLOSE_TRIGGER * 1.7) {
-      drawerGesture.current.active = false;
-      closeDrawer();
-    }
-  };
-
-  const endDrawerSwipe = () => {
-    drawerGesture.current.active = false;
-  };
-
-  const isOpenDrawerSwipe = useCallback((gestureState) => {
-    const dx = gestureState.dx || 0;
-    const dy = gestureState.dy || 0;
-    return dx <= -DRAWER_SWIPE_TRIGGER && Math.abs(dx) > Math.abs(dy) * 1.35;
+  const finishCloseDrawer = useCallback(() => {
+    setDrawerOpen(false);
+    setDrawerView('menu');
   }, []);
 
-  const drawerPanResponder = useMemo(() => PanResponder.create({
-    onMoveShouldSetPanResponderCapture: (event, gestureState) => {
-      if (drawerOpen || dragging || composer) return false;
-      return isOpenDrawerSwipe(gestureState);
-    },
-    onPanResponderMove: (event, gestureState) => {
-      if (isOpenDrawerSwipe(gestureState)) {
-        openDrawer();
-      }
-    },
-    onPanResponderTerminationRequest: () => true,
-  }), [composer, drawerOpen, dragging, isOpenDrawerSwipe, openDrawer]);
+  const showDrawerForGesture = useCallback(() => {
+    Keyboard.dismiss();
+    setDrawerOpen(true);
+  }, []);
+
+  const openDrawer = useCallback(() => {
+    if (drawerOpen) return;
+    showDrawerForGesture();
+    drawerProgress.value = withTiming(1, { duration: MOTION.enter });
+  }, [drawerOpen, drawerProgress, showDrawerForGesture]);
+
+  const closeDrawer = useCallback((animated = true) => {
+    if (!animated) {
+      drawerProgress.value = 0;
+      finishCloseDrawer();
+      return;
+    }
+    drawerProgress.value = withTiming(0, { duration: MOTION.exit }, finished => {
+      if (finished) runOnJS(finishCloseDrawer)();
+    });
+  }, [drawerProgress, finishCloseDrawer]);
+
+  const openDrawerGesture = useMemo(() => Gesture.Pan()
+    .enabled(!dragging && !composer)
+    .activeOffsetX([-10, 9999])
+    .failOffsetY([-24, 24])
+    .onStart(() => {
+      drawerProgress.value = 0;
+      runOnJS(showDrawerForGesture)();
+    })
+    .onUpdate(event => {
+      drawerProgress.value = clamp01(-event.translationX / DRAWER_SWIPE_TRIGGER);
+    })
+    .onEnd(event => {
+      const shouldOpen = drawerProgress.value > 0.42 || event.velocityX < -520;
+      drawerProgress.value = withTiming(shouldOpen ? 1 : 0, { duration: shouldOpen ? MOTION.enter : MOTION.exit }, finished => {
+        if (finished && !shouldOpen) runOnJS(finishCloseDrawer)();
+      });
+    }), [composer, drawerProgress, dragging, finishCloseDrawer, showDrawerForGesture]);
+
+  const closeDrawerGesture = useMemo(() => Gesture.Pan()
+    .enabled(drawerOpen)
+    .activeOffsetX([-9999, 10])
+    .failOffsetY([-24, 24])
+    .onUpdate(event => {
+      drawerProgress.value = clamp01(1 - event.translationX / DRAWER_CLOSE_TRIGGER);
+    })
+    .onEnd(event => {
+      const shouldClose = drawerProgress.value < 0.58 || event.velocityX > 380;
+      drawerProgress.value = withTiming(shouldClose ? 0 : 1, { duration: shouldClose ? MOTION.exit : MOTION.enter }, finished => {
+        if (finished && shouldClose) runOnJS(finishCloseDrawer)();
+      });
+    }), [drawerOpen, drawerProgress, finishCloseDrawer]);
+
+  const drawerBackdropStyle = useAnimatedStyle(() => ({
+    opacity: drawerProgress.value,
+  }));
+
+  const drawerPanelStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateY: -DRAWER_HEIGHT / 2 },
+      { translateX: (1 - drawerProgress.value) * DRAWER_OFFSET },
+      { scale: 0.96 + drawerProgress.value * 0.04 },
+    ],
+  }));
 
   const openComposer = (qid, task = null) => {
     if (drawerOpen) closeDrawer(false);
@@ -1038,156 +1041,143 @@ function EisenhowerApp() {
         onLayout={handleShellLayout}
         style={[styles.shell, shellHeight > 0 && { minHeight: shellHeight }]}
       >
-        <View testID="matrix-gesture-layer" style={styles.safeLayer} {...drawerPanResponder.panHandlers}>
-        <View style={styles.grid}>
-          {QUADS.map(q => (
-            <QuadrantTile
-              key={q.id}
-              q={q}
-              color={COLORS[q.id]}
-              tasks={tasks[q.id]}
-              topInset={insets.top}
-              dropMarkerTop={dropTarget === q.id ? getDropMarkerTop(q.id, dropIndex) : null}
-              draggingTaskId={dragging?.task.id || null}
-              draggingActive={!!dragging}
-              setQuadRef={node => { quadRefs.current[q.id] = node; }}
-              setTaskAreaRef={node => { taskAreaRefs.current[q.id] = node; }}
-              setTaskListRef={node => { taskListRefs.current[q.id] = node; }}
-              onMeasure={measureTargets}
-              onTaskScroll={(qid, offset) => {
-                taskScrollOffsets.current[qid] = offset;
-              }}
-              onTaskContentSize={(qid, height) => {
-                taskContentHeights.current[qid] = height;
-              }}
-              onTaskLayout={(qid, taskId, event) => {
-                const { y, height } = event.nativeEvent.layout;
-                if (!taskLayouts.current[qid]) taskLayouts.current[qid] = {};
-                taskLayouts.current[qid][taskId] = { y, height };
-              }}
-              onOpenComposer={openComposer}
-              onToggleTask={toggleTask}
-              onBeginDrag={beginDrag}
-              onDragMove={updateDrag}
-              onEndDrag={endDrag}
-            />
-          ))}
-        </View>
+        <GestureDetector gesture={openDrawerGesture}>
+          <View testID="matrix-gesture-layer" style={styles.safeLayer}>
+            <View style={styles.grid}>
+              {QUADS.map(q => (
+                <QuadrantTile
+                  key={q.id}
+                  q={q}
+                  color={COLORS[q.id]}
+                  tasks={tasks[q.id]}
+                  topInset={insets.top}
+                  dropMarkerTop={dropTarget === q.id ? getDropMarkerTop(q.id, dropIndex) : null}
+                  draggingTaskId={dragging?.task.id || null}
+                  draggingActive={!!dragging}
+                  setQuadRef={node => { quadRefs.current[q.id] = node; }}
+                  setTaskAreaRef={node => { taskAreaRefs.current[q.id] = node; }}
+                  setTaskListRef={node => { taskListRefs.current[q.id] = node; }}
+                  onMeasure={measureTargets}
+                  onTaskScroll={(qid, offset) => {
+                    taskScrollOffsets.current[qid] = offset;
+                  }}
+                  onTaskContentSize={(qid, height) => {
+                    taskContentHeights.current[qid] = height;
+                  }}
+                  onTaskLayout={(qid, taskId, event) => {
+                    const { y, height } = event.nativeEvent.layout;
+                    if (!taskLayouts.current[qid]) taskLayouts.current[qid] = {};
+                    taskLayouts.current[qid][taskId] = { y, height };
+                  }}
+                  onOpenComposer={openComposer}
+                  onToggleTask={toggleTask}
+                  onBeginDrag={beginDrag}
+                  onDragMove={updateDrag}
+                  onEndDrag={endDrag}
+                />
+              ))}
+            </View>
 
-        <Animated.View
-          ref={trashRef}
-          collapsable={false}
-          pointerEvents="none"
-          style={[
-            styles.deleteTarget,
-            {
-              opacity: trashAnim,
-              height: DELETE_TARGET_HEIGHT + insets.bottom,
-              transform: [{ translateY: trashAnim.interpolate({ inputRange: [0, 1], outputRange: [DELETE_TARGET_HEIGHT + insets.bottom, 0] }) }],
-            },
-          ]}
-        >
-          <Animated.View
-            style={[
-              styles.trashDrop,
-              {
-                transform: [{ scaleY: deleteHotAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] }) }],
-              },
-            ]}
-          >
-            <Animated.View style={[styles.trashDropHot, { opacity: deleteHotAnim }]} />
-          </Animated.View>
-        </Animated.View>
-
-        {lastDeleted && !dragging && (
-          <Animated.View
-            accessibilityRole="alert"
-            style={[
-              styles.undo,
-              {
-                bottom: 14 + insets.bottom,
-                opacity: undoAnim,
-                transform: [{ translateY: undoAnim.interpolate({ inputRange: [0, 1], outputRange: [18, 0] }) }],
-              },
-            ]}
-          >
-            <Text style={styles.undoText}>Task deleted</Text>
-            <Pressable onPress={undoDelete} style={styles.undoButton}>
-              <Text style={styles.undoButtonText}>Undo</Text>
-            </Pressable>
-          </Animated.View>
-        )}
-
-        </View>
-
-        {drawerOpen && (
-          <SafeAreaView testID="edge-drawer" style={styles.drawerLayer} edges={['top', 'bottom', 'right']}>
-            <AnimatedPressable
-              accessibilityLabel="Close navigation drawer"
-              testID="drawer-backdrop"
-              onPress={() => closeDrawer()}
-              style={[
-                styles.drawerBackdrop,
-                { opacity: drawerAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 1] }) },
-              ]}
-            />
             <Animated.View
-              testID="drawer-panel"
-              onTouchCancel={endDrawerSwipe}
-              onTouchEnd={endDrawerSwipe}
-              onTouchMove={moveDrawerSwipe}
-              onTouchStart={beginDrawerSwipe}
+              ref={trashRef}
+              collapsable={false}
+              pointerEvents="none"
               style={[
-                styles.drawerPanel,
+                styles.deleteTarget,
                 {
-                  transform: [
-                    { translateY: -DRAWER_HEIGHT / 2 },
-                    { translateX: drawerAnim.interpolate({ inputRange: [0, 1], outputRange: [DRAWER_WIDTH + 18, 0] }) },
-                    { scale: drawerAnim.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) },
-                  ],
+                  opacity: trashAnim,
+                  height: DELETE_TARGET_HEIGHT + insets.bottom,
+                  transform: [{ translateY: trashAnim.interpolate({ inputRange: [0, 1], outputRange: [DELETE_TARGET_HEIGHT + insets.bottom, 0] }) }],
                 },
               ]}
             >
-              {drawerView === 'history' ? (
-                <>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Back to drawer menu"
-                    testID="drawer-history-back"
-                    onPress={() => setDrawerView('menu')}
-                    style={({ pressed }) => [styles.drawerIconButton, pressed && styles.drawerIconButtonPressed]}
-                  >
-                    <BackIcon />
-                  </Pressable>
-                  <View testID="drawer-history-empty" style={styles.drawerHistoryEmpty}>
-                    <HistoryIcon />
-                    <View style={styles.drawerHistoryLine} />
-                    <View style={[styles.drawerHistoryLine, styles.drawerHistoryLineShort]} />
-                  </View>
-                </>
-              ) : (
-                <>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Show today"
-                    testID="drawer-today-action"
-                    onPress={() => closeDrawer()}
-                    style={({ pressed }) => [styles.drawerIconButton, styles.drawerIconButtonActive, pressed && styles.drawerIconButtonPressed]}
-                  >
-                    <TodayIcon />
-                  </Pressable>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Show history"
-                    testID="drawer-history-action"
-                    onPress={() => setDrawerView('history')}
-                    style={({ pressed }) => [styles.drawerIconButton, pressed && styles.drawerIconButtonPressed]}
-                  >
-                    <HistoryIcon />
-                  </Pressable>
-                </>
-              )}
+              <Animated.View
+                style={[
+                  styles.trashDrop,
+                  {
+                    transform: [{ scaleY: deleteHotAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] }) }],
+                  },
+                ]}
+              >
+                <Animated.View style={[styles.trashDropHot, { opacity: deleteHotAnim }]} />
+              </Animated.View>
             </Animated.View>
+
+            {lastDeleted && !dragging && (
+              <Animated.View
+                accessibilityRole="alert"
+                style={[
+                  styles.undo,
+                  {
+                    bottom: 14 + insets.bottom,
+                    opacity: undoAnim,
+                    transform: [{ translateY: undoAnim.interpolate({ inputRange: [0, 1], outputRange: [18, 0] }) }],
+                  },
+                ]}
+              >
+                <Text style={styles.undoText}>Task deleted</Text>
+                <Pressable onPress={undoDelete} style={styles.undoButton}>
+                  <Text style={styles.undoButtonText}>Undo</Text>
+                </Pressable>
+              </Animated.View>
+            )}
+
+          </View>
+        </GestureDetector>
+
+        {drawerOpen && (
+          <SafeAreaView testID="edge-drawer" style={styles.drawerLayer} edges={['top', 'bottom', 'right']}>
+            <Reanimated.View style={[styles.drawerBackdrop, drawerBackdropStyle]}>
+              <Pressable
+                accessibilityLabel="Close navigation drawer"
+                testID="drawer-backdrop"
+                onPress={() => closeDrawer()}
+                style={styles.drawerBackdropPressable}
+              />
+            </Reanimated.View>
+            <GestureDetector gesture={closeDrawerGesture}>
+              <Reanimated.View testID="drawer-panel" style={[styles.drawerPanel, drawerPanelStyle]}>
+                {drawerView === 'history' ? (
+                  <>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Back to drawer menu"
+                      testID="drawer-history-back"
+                      onPress={() => setDrawerView('menu')}
+                      style={({ pressed }) => [styles.drawerIconButton, pressed && styles.drawerIconButtonPressed]}
+                    >
+                      <BackIcon />
+                    </Pressable>
+                    <View testID="drawer-history-empty" style={styles.drawerHistoryEmpty}>
+                      <HistoryIcon />
+                      <View style={styles.drawerHistoryLine} />
+                      <View style={[styles.drawerHistoryLine, styles.drawerHistoryLineShort]} />
+                    </View>
+                  </>
+                ) : (
+                  <>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Show today"
+                      testID="drawer-today-action"
+                      onPress={() => closeDrawer()}
+                      style={({ pressed }) => [styles.drawerIconButton, styles.drawerIconButtonActive, pressed && styles.drawerIconButtonPressed]}
+                    >
+                      <TodayIcon />
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Show history"
+                      testID="drawer-history-action"
+                      onPress={() => setDrawerView('history')}
+                      style={({ pressed }) => [styles.drawerIconButton, pressed && styles.drawerIconButtonPressed]}
+                    >
+                      <HistoryIcon />
+                    </Pressable>
+                  </>
+                )}
+              </Reanimated.View>
+            </GestureDetector>
           </SafeAreaView>
         )}
 
@@ -1285,11 +1275,13 @@ function EisenhowerApp() {
 
 export default function App() {
   return (
-    <SafeAreaProvider>
-      <KeyboardProvider>
-        <EisenhowerApp />
-      </KeyboardProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={styles.appRoot}>
+      <SafeAreaProvider>
+        <KeyboardProvider>
+          <EisenhowerApp />
+        </KeyboardProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 
@@ -1313,6 +1305,9 @@ function addButtonBg(quadId) {
 }
 
 const styles = StyleSheet.create({
+  appRoot: {
+    flex: 1,
+  },
   root: {
     flex: 1,
     backgroundColor: INK,
@@ -1566,6 +1561,9 @@ const styles = StyleSheet.create({
   drawerBackdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'transparent',
+  },
+  drawerBackdropPressable: {
+    ...StyleSheet.absoluteFillObject,
   },
   drawerPanel: {
     position: 'absolute',
