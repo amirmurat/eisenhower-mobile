@@ -35,10 +35,10 @@ const DROP_HIT_TEST_INTERVAL = 40;
 const DRAG_POINT_EPSILON = 1.25;
 const LONG_TASK_TEXT_LENGTH = 34;
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
-const INK = '#1A1A1A';
-const DROP_GUIDE = '#FFDD66';
-const DANGER = '#E5483E';
-const DANGER_SOFT = 'rgba(229,72,62,0.18)';
+const INK = '#161616';
+const DROP_GUIDE = '#F4C430';
+const DANGER = '#D94A3A';
+const DANGER_SOFT = 'rgba(217,74,58,0.16)';
 const DRAWER_SWIPE_TRIGGER = 72;
 const DRAWER_CLOSE_TRIGGER = 38;
 const DRAWER_WIDTH = 64;
@@ -71,17 +71,17 @@ const INIT = {
 };
 
 const COLORS = {
-  q1: { bg: '#1A1A1A', fg: '#fff', muted: 'rgba(255,255,255,0.46)', check: '#fff', done: 'rgba(255,255,255,0.34)' },
-  q2: { bg: '#FFFFFF', fg: INK, muted: 'rgba(26,26,26,0.46)', check: INK, done: 'rgba(26,26,26,0.34)' },
-  q3: { bg: '#CCCCCC', fg: INK, muted: 'rgba(26,26,26,0.42)', check: INK, done: 'rgba(26,26,26,0.32)' },
-  q4: { bg: '#B3B3B3', fg: INK, muted: 'rgba(26,26,26,0.42)', check: INK, done: 'rgba(26,26,26,0.32)' },
+  q1: { bg: '#161616', fg: '#FFFFFF', muted: 'rgba(255,255,255,0.50)', check: '#FFFFFF', done: 'rgba(255,255,255,0.36)' },
+  q2: { bg: '#FFE68A', fg: INK, muted: 'rgba(22,22,22,0.50)', check: INK, done: 'rgba(22,22,22,0.34)' },
+  q3: { bg: '#F2F2F0', fg: INK, muted: 'rgba(22,22,22,0.46)', check: INK, done: 'rgba(22,22,22,0.32)' },
+  q4: { bg: '#F7DAD5', fg: INK, muted: 'rgba(22,22,22,0.46)', check: INK, done: 'rgba(22,22,22,0.32)' },
 };
 
 const TASK_DIVIDER_COLORS = {
   q1: 'rgba(255,255,255,0.14)',
-  q2: 'rgba(26,26,26,0.12)',
-  q3: 'rgba(26,26,26,0.14)',
-  q4: 'rgba(26,26,26,0.16)',
+  q2: 'rgba(22,22,22,0.12)',
+  q3: 'rgba(22,22,22,0.10)',
+  q4: 'rgba(22,22,22,0.10)',
 };
 
 function TodayIcon() {
@@ -192,7 +192,7 @@ function getTaskDividerColor(quadId) {
 
 function CheckButton({ done, quadId, taskId, onPress }) {
   const color = COLORS[quadId];
-  const idleBorder = quadId === 'q1' ? 'rgba(255,255,255,0.42)' : 'rgba(26,26,26,0.32)';
+  const idleBorder = quadId === 'q1' ? 'rgba(255,255,255,0.42)' : 'rgba(22,22,22,0.30)';
   return (
     <Pressable
       accessibilityRole="button"
@@ -1197,7 +1197,7 @@ function EisenhowerApp() {
                   { translateY: dragYAnim },
                   { scale: dragAnim.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) },
                 ],
-                borderColor: 'rgba(26,26,26,0.08)',
+                borderColor: 'rgba(22,22,22,0.08)',
               },
             ]}
           >
@@ -1243,7 +1243,7 @@ function EisenhowerApp() {
                     onChangeText={setAddVal}
                     onSubmitEditing={saveComposer}
                     placeholder="Task name..."
-                    placeholderTextColor={composer.qid === 'q1' ? 'rgba(255,255,255,0.38)' : 'rgba(26,26,26,0.42)'}
+                    placeholderTextColor={composer.qid === 'q1' ? 'rgba(255,255,255,0.38)' : 'rgba(22,22,22,0.42)'}
                     returnKeyType="done"
                     style={[styles.addInput, addInputBg(composer.qid), { color: activeComposerColor.fg }]}
                     autoFocus
@@ -1291,12 +1291,12 @@ function composerPanelBg(quadId) {
 
 function composerBorder(quadId) {
   if (quadId === 'q1') return { borderColor: 'rgba(255,255,255,0.16)' };
-  return { borderColor: 'rgba(26,26,26,0.08)' };
+  return { borderColor: 'rgba(22,22,22,0.08)' };
 }
 
 function addInputBg(quadId) {
   if (quadId === 'q1') return { backgroundColor: 'rgba(255,255,255,0.1)' };
-  return { backgroundColor: 'rgba(26,26,26,0.06)' };
+  return { backgroundColor: 'rgba(22,22,22,0.06)' };
 }
 
 function addButtonBg(quadId) {
@@ -1573,7 +1573,7 @@ const styles = StyleSheet.create({
     height: DRAWER_HEIGHT,
     backgroundColor: '#FFFFFF',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(26,26,26,0.18)',
+    borderColor: 'rgba(22,22,22,0.18)',
     borderRadius: 8,
     paddingVertical: 8,
     alignItems: 'center',
@@ -1587,7 +1587,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(26,26,26,0.14)',
+    borderColor: 'rgba(22,22,22,0.14)',
   },
   drawerIconButtonActive: {
     backgroundColor: DROP_GUIDE,
@@ -1660,7 +1660,7 @@ const styles = StyleSheet.create({
     height: 92,
     borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(26,26,26,0.14)',
+    borderColor: 'rgba(22,22,22,0.14)',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
@@ -1669,7 +1669,7 @@ const styles = StyleSheet.create({
     width: 24,
     height: 2,
     borderRadius: 1,
-    backgroundColor: 'rgba(26,26,26,0.24)',
+    backgroundColor: 'rgba(22,22,22,0.24)',
   },
   drawerHistoryLineShort: {
     width: 15,
@@ -1680,7 +1680,7 @@ const styles = StyleSheet.create({
   },
   composerBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(26,26,26,0.08)',
+    backgroundColor: 'rgba(22,22,22,0.08)',
   },
   composerKeyboard: {
     ...StyleSheet.absoluteFillObject,
