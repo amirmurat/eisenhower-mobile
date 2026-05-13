@@ -37,6 +37,10 @@ const INK = '#1A1A1A';
 const DROP_GUIDE = '#FFDD66';
 const DANGER = '#E5483E';
 const DANGER_SOFT = 'rgba(229,72,62,0.18)';
+const EDGE_SWIPE_WIDTH = 24;
+const EDGE_SWIPE_TRIGGER = 34;
+const EDGE_DRAWER_MAX_WIDTH = 224;
+const EDGE_DRAWER_MIN_WIDTH = 184;
 
 const MOTION = {
   enter: 150,
@@ -400,7 +404,7 @@ const QuadrantTile = memo(function QuadrantTile({
 
 function EisenhowerApp() {
   const insets = useSafeAreaInsets();
-  const { height: windowHeight } = useWindowDimensions();
+  const { width: windowWidth } = useWindowDimensions();
   const [fontsLoaded] = useFonts({
     Nunito_600SemiBold: require('@expo-google-fonts/nunito/600SemiBold/Nunito_600SemiBold.ttf'),
     Nunito_700Bold: require('@expo-google-fonts/nunito/700Bold/Nunito_700Bold.ttf'),
@@ -415,6 +419,8 @@ function EisenhowerApp() {
   const [dropTarget, setDropTarget] = useState(null);
   const [dropIndex, setDropIndex] = useState(null);
   const [lastDeleted, setLastDeleted] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerView, setDrawerView] = useState('menu');
   const [loaded, setLoaded] = useState(false);
   const [shellHeight, setShellHeight] = useState(0);
   const shellHeightRef = useRef(0);
@@ -440,6 +446,8 @@ function EisenhowerApp() {
   const pendingDragPoint = useRef(null);
   const lastHitTestAt = useRef(0);
   const lastGhostPoint = useRef(null);
+  const edgeGesture = useRef({ active: false, startX: 0, startY: 0 });
+  const drawerGesture = useRef({ active: false, startX: 0, startY: 0 });
   const undoTimer = useRef(null);
   const persistTimer = useRef(null);
   const persistInteraction = useRef(null);
@@ -450,6 +458,7 @@ function EisenhowerApp() {
   const deleteHotAnim = useRef(new Animated.Value(0)).current;
   const trashAnim = useRef(new Animated.Value(0)).current;
   const undoAnim = useRef(new Animated.Value(0)).current;
+  const drawerAnim = useRef(new Animated.Value(0)).current;
 
   tasksRef.current = tasks;
 
@@ -671,7 +680,84 @@ function EisenhowerApp() {
     autoScrollFrame.current = requestAnimationFrame(runAutoScroll);
   };
 
+  const openDrawer = () => {
+    if (drawerOpen) return;
+    Keyboard.dismiss();
+    drawerAnim.stopAnimation();
+    setDrawerOpen(true);
+    Animated.timing(drawerAnim, {
+      toValue: 1,
+      duration: MOTION.enter,
+      easing: MOTION.out,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const closeDrawer = (animated = true) => {
+    drawerAnim.stopAnimation();
+    const finish = () => {
+      setDrawerOpen(false);
+      setDrawerView('menu');
+    };
+    if (!animated) {
+      drawerAnim.setValue(0);
+      finish();
+      return;
+    }
+    Animated.timing(drawerAnim, {
+      toValue: 0,
+      duration: MOTION.exit,
+      easing: MOTION.in,
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) finish();
+    });
+  };
+
+  const beginEdgeSwipe = event => {
+    const { pageX, pageY } = event.nativeEvent;
+    edgeGesture.current = { active: true, startX: pageX, startY: pageY };
+  };
+
+  const moveEdgeSwipe = event => {
+    const gesture = edgeGesture.current;
+    if (!gesture.active || drawerOpen || dragging || composer) return;
+    const { pageX, pageY } = event.nativeEvent;
+    const dx = pageX - gesture.startX;
+    const dy = pageY - gesture.startY;
+    if (dx <= -EDGE_SWIPE_TRIGGER && Math.abs(dy) < EDGE_SWIPE_TRIGGER * 1.5) {
+      edgeGesture.current.active = false;
+      openDrawer();
+    }
+  };
+
+  const endEdgeSwipe = () => {
+    edgeGesture.current.active = false;
+  };
+
+  const beginDrawerSwipe = event => {
+    const { pageX, pageY } = event.nativeEvent;
+    drawerGesture.current = { active: true, startX: pageX, startY: pageY };
+  };
+
+  const moveDrawerSwipe = event => {
+    const gesture = drawerGesture.current;
+    if (!gesture.active) return;
+    const { pageX, pageY } = event.nativeEvent;
+    const dx = pageX - gesture.startX;
+    const dy = pageY - gesture.startY;
+    if (dx >= EDGE_SWIPE_TRIGGER && Math.abs(dy) < EDGE_SWIPE_TRIGGER * 1.7) {
+      drawerGesture.current.active = false;
+      closeDrawer();
+    }
+  };
+
+  const endDrawerSwipe = () => {
+    drawerGesture.current.active = false;
+  };
+
   const openComposer = (qid, task = null) => {
+    if (drawerOpen) closeDrawer(false);
     composerAnim.stopAnimation();
     setComposer({ qid, taskId: task?.id || null });
     setAddVal(task?.text || '');
@@ -829,6 +915,7 @@ function EisenhowerApp() {
   };
 
   const beginDrag = (from, task, x, y) => {
+    if (drawerOpen) closeDrawer(false);
     closeComposer(false);
     measureTargets();
     lastHitTestAt.current = 0;
@@ -891,8 +978,9 @@ function EisenhowerApp() {
   const activeComposer = composer ? QUADS.find(q => q.id === composer.qid) : null;
   const activeComposerColor = composer ? COLORS[composer.qid] : null;
   const composerMode = composer?.taskId ? 'Edit task' : 'New task';
-  const shellWidth = shellRect.current.width || 430;
+  const shellWidth = shellRect.current.width || Math.min(windowWidth || 430, 430);
   const dragGhostWidth = Math.max(132, Math.min(172, shellWidth / 2 - 28));
+  const drawerWidth = Math.max(EDGE_DRAWER_MIN_WIDTH, Math.min(EDGE_DRAWER_MAX_WIDTH, shellWidth * 0.54));
 
   const getDropMarkerTop = (qid, index) => {
     if (!Number.isInteger(index)) return null;
@@ -1003,7 +1091,92 @@ function EisenhowerApp() {
             </Pressable>
           </Animated.View>
         )}
+
+        <View
+          accessible={false}
+          testID="edge-drawer-hitbox"
+          pointerEvents={drawerOpen || dragging || composer ? 'none' : 'auto'}
+          onTouchCancel={endEdgeSwipe}
+          onTouchEnd={endEdgeSwipe}
+          onTouchMove={moveEdgeSwipe}
+          onTouchStart={beginEdgeSwipe}
+          style={styles.edgeDrawerHitbox}
+        />
         </View>
+
+        {drawerOpen && (
+          <SafeAreaView testID="edge-drawer" style={styles.drawerLayer} edges={['top', 'bottom', 'right']}>
+            <AnimatedPressable
+              accessibilityLabel="Close navigation drawer"
+              testID="drawer-backdrop"
+              onPress={() => closeDrawer()}
+              style={[
+                styles.drawerBackdrop,
+                { opacity: drawerAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 1] }) },
+              ]}
+            />
+            <Animated.View
+              testID="drawer-panel"
+              onTouchCancel={endDrawerSwipe}
+              onTouchEnd={endDrawerSwipe}
+              onTouchMove={moveDrawerSwipe}
+              onTouchStart={beginDrawerSwipe}
+              style={[
+                styles.drawerPanel,
+                {
+                  width: drawerWidth,
+                  paddingTop: 14 + insets.top,
+                  paddingBottom: 14 + insets.bottom,
+                  transform: [{ translateX: drawerAnim.interpolate({ inputRange: [0, 1], outputRange: [drawerWidth, 0] }) }],
+                },
+              ]}
+            >
+              {drawerView === 'history' ? (
+                <>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Back to drawer menu"
+                    testID="drawer-history-back"
+                    onPress={() => setDrawerView('menu')}
+                    style={({ pressed }) => [styles.drawerBackButton, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.drawerBackText}>Back</Text>
+                  </Pressable>
+                  <Text style={styles.drawerTitle}>History</Text>
+                  <Text style={styles.drawerBodyText}>Saved days will appear here after daily reset is added.</Text>
+                  <View style={styles.drawerEmptyBox}>
+                    <Text style={styles.drawerEmptyText}>No saved days yet</Text>
+                  </View>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.drawerTitle}>Menu</Text>
+                  <Text style={styles.drawerBodyText}>Swipe right or tap outside to return to the matrix.</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Show today"
+                    testID="drawer-today-action"
+                    onPress={() => closeDrawer()}
+                    style={({ pressed }) => [styles.drawerAction, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.drawerActionTitle}>Today</Text>
+                    <Text style={styles.drawerActionMeta}>Current matrix</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Show history"
+                    testID="drawer-history-action"
+                    onPress={() => setDrawerView('history')}
+                    style={({ pressed }) => [styles.drawerAction, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.drawerActionTitle}>History</Text>
+                    <Text style={styles.drawerActionMeta}>Daily archive</Text>
+                  </Pressable>
+                </>
+              )}
+            </Animated.View>
+          </SafeAreaView>
+        )}
 
         {dragging && (
           <Animated.View
@@ -1371,6 +1544,93 @@ const styles = StyleSheet.create({
     color: INK,
     fontFamily: 'Nunito_900Black',
     fontSize: 12,
+  },
+  edgeDrawerHitbox: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    width: EDGE_SWIPE_WIDTH,
+    zIndex: 12,
+  },
+  drawerLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 18,
+  },
+  drawerBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(26,26,26,0.14)',
+  },
+  drawerPanel: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#FFFFFF',
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderLeftColor: 'rgba(26,26,26,0.16)',
+    paddingHorizontal: 12,
+  },
+  drawerTitle: {
+    color: INK,
+    fontFamily: 'Nunito_900Black',
+    fontSize: 18,
+    lineHeight: 22,
+    marginBottom: 8,
+  },
+  drawerBodyText: {
+    color: 'rgba(26,26,26,0.52)',
+    fontFamily: 'Nunito_600SemiBold',
+    fontSize: 11,
+    lineHeight: 15,
+    marginBottom: 14,
+  },
+  drawerAction: {
+    minHeight: 54,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(26,26,26,0.12)',
+    justifyContent: 'center',
+    paddingVertical: 9,
+  },
+  drawerActionTitle: {
+    color: INK,
+    fontFamily: 'Nunito_800ExtraBold',
+    fontSize: 14,
+    lineHeight: 18,
+  },
+  drawerActionMeta: {
+    color: 'rgba(26,26,26,0.45)',
+    fontFamily: 'Nunito_600SemiBold',
+    fontSize: 10,
+    lineHeight: 13,
+    marginTop: 1,
+  },
+  drawerBackButton: {
+    alignSelf: 'flex-start',
+    minHeight: 42,
+    justifyContent: 'center',
+    marginBottom: 6,
+  },
+  drawerBackText: {
+    color: INK,
+    fontFamily: 'Nunito_800ExtraBold',
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  drawerEmptyBox: {
+    minHeight: 76,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(26,26,26,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+  drawerEmptyText: {
+    color: 'rgba(26,26,26,0.46)',
+    fontFamily: 'Nunito_700Bold',
+    fontSize: 11,
+    lineHeight: 15,
+    textAlign: 'center',
   },
   composerSafe: {
     ...StyleSheet.absoluteFillObject,
