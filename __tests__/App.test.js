@@ -118,14 +118,12 @@ describe('task composer', () => {
     expect(screen.getByTestId('task-3')).not.toHaveStyle({ borderBottomWidth: StyleSheet.hairlineWidth });
   });
 
-  test('opens the right edge drawer with a swipe and shows the history prototype', async () => {
+  test('opens the right edge drawer fallback and shows the history prototype', async () => {
     render(<App />);
 
     const edge = await screen.findByTestId('edge-drawer-hitbox');
 
-    fireEvent(edge, 'touchStart', { nativeEvent: { pageX: 424, pageY: 320 } });
-    fireEvent(edge, 'touchMove', { nativeEvent: { pageX: 372, pageY: 322 } });
-    fireEvent(edge, 'touchEnd', { nativeEvent: { pageX: 372, pageY: 322 } });
+    fireEvent.press(edge);
 
     expect(await screen.findByTestId('edge-drawer')).toBeOnTheScreen();
     fireEvent.press(screen.getByTestId('drawer-history-action'));

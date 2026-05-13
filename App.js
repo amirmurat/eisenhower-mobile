@@ -8,6 +8,7 @@ import {
   FlatList,
   InteractionManager,
   Keyboard,
+  PanResponder,
   Platform,
   Pressable,
   StyleSheet,
@@ -37,7 +38,9 @@ const INK = '#1A1A1A';
 const DROP_GUIDE = '#FFDD66';
 const DANGER = '#E5483E';
 const DANGER_SOFT = 'rgba(229,72,62,0.18)';
-const EDGE_SWIPE_WIDTH = 24;
+const EDGE_SWIPE_WIDTH = 32;
+const EDGE_SWIPE_ZONE_WIDTH = 92;
+const EDGE_SWIPE_SYSTEM_GAP = 12;
 const EDGE_SWIPE_TRIGGER = 34;
 const EDGE_DRAWER_MAX_WIDTH = 224;
 const EDGE_DRAWER_MIN_WIDTH = 184;
@@ -446,7 +449,6 @@ function EisenhowerApp() {
   const pendingDragPoint = useRef(null);
   const lastHitTestAt = useRef(0);
   const lastGhostPoint = useRef(null);
-  const edgeGesture = useRef({ active: false, startX: 0, startY: 0 });
   const drawerGesture = useRef({ active: false, startX: 0, startY: 0 });
   const undoTimer = useRef(null);
   const persistTimer = useRef(null);
@@ -680,7 +682,7 @@ function EisenhowerApp() {
     autoScrollFrame.current = requestAnimationFrame(runAutoScroll);
   };
 
-  const openDrawer = () => {
+  const openDrawer = useCallback(() => {
     if (drawerOpen) return;
     Keyboard.dismiss();
     drawerAnim.stopAnimation();
@@ -691,9 +693,9 @@ function EisenhowerApp() {
       easing: MOTION.out,
       useNativeDriver: true,
     }).start();
-  };
+  }, [drawerAnim, drawerOpen]);
 
-  const closeDrawer = (animated = true) => {
+  const closeDrawer = useCallback((animated = true) => {
     drawerAnim.stopAnimation();
     const finish = () => {
       setDrawerOpen(false);
@@ -712,28 +714,7 @@ function EisenhowerApp() {
     }).start(({ finished }) => {
       if (finished) finish();
     });
-  };
-
-  const beginEdgeSwipe = event => {
-    const { pageX, pageY } = event.nativeEvent;
-    edgeGesture.current = { active: true, startX: pageX, startY: pageY };
-  };
-
-  const moveEdgeSwipe = event => {
-    const gesture = edgeGesture.current;
-    if (!gesture.active || drawerOpen || dragging || composer) return;
-    const { pageX, pageY } = event.nativeEvent;
-    const dx = pageX - gesture.startX;
-    const dy = pageY - gesture.startY;
-    if (dx <= -EDGE_SWIPE_TRIGGER && Math.abs(dy) < EDGE_SWIPE_TRIGGER * 1.5) {
-      edgeGesture.current.active = false;
-      openDrawer();
-    }
-  };
-
-  const endEdgeSwipe = () => {
-    edgeGesture.current.active = false;
-  };
+  }, [drawerAnim]);
 
   const beginDrawerSwipe = event => {
     const { pageX, pageY } = event.nativeEvent;
@@ -755,6 +736,27 @@ function EisenhowerApp() {
   const endDrawerSwipe = () => {
     drawerGesture.current.active = false;
   };
+
+  const isDrawerSwipeStart = useCallback((x) => {
+    const rect = shellRect.current;
+    const width = rect.width || Math.min(windowWidth || 430, 430);
+    const right = (rect.x || 0) + width;
+    return x >= right - EDGE_SWIPE_ZONE_WIDTH && x <= right - EDGE_SWIPE_SYSTEM_GAP;
+  }, [windowWidth]);
+
+  const drawerPanResponder = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponderCapture: (event, gestureState) => {
+      if (drawerOpen || dragging || composer) return false;
+      if (!isDrawerSwipeStart(gestureState.x0)) return false;
+      return gestureState.dx <= -8 && Math.abs(gestureState.dy) <= 22;
+    },
+    onPanResponderMove: (event, gestureState) => {
+      if (gestureState.dx <= -EDGE_SWIPE_TRIGGER && Math.abs(gestureState.dy) <= EDGE_SWIPE_TRIGGER * 1.6) {
+        openDrawer();
+      }
+    },
+    onPanResponderTerminationRequest: () => true,
+  }), [composer, drawerOpen, dragging, isDrawerSwipeStart, openDrawer]);
 
   const openComposer = (qid, task = null) => {
     if (drawerOpen) closeDrawer(false);
@@ -1012,7 +1014,7 @@ function EisenhowerApp() {
         onLayout={handleShellLayout}
         style={[styles.shell, shellHeight > 0 && { minHeight: shellHeight }]}
       >
-        <View style={styles.safeLayer}>
+        <View testID="matrix-gesture-layer" style={styles.safeLayer} {...drawerPanResponder.panHandlers}>
         <View style={styles.grid}>
           {QUADS.map(q => (
             <QuadrantTile
@@ -1092,14 +1094,11 @@ function EisenhowerApp() {
           </Animated.View>
         )}
 
-        <View
+        <Pressable
           accessible={false}
           testID="edge-drawer-hitbox"
           pointerEvents={drawerOpen || dragging || composer ? 'none' : 'auto'}
-          onTouchCancel={endEdgeSwipe}
-          onTouchEnd={endEdgeSwipe}
-          onTouchMove={moveEdgeSwipe}
-          onTouchStart={beginEdgeSwipe}
+          onPress={openDrawer}
           style={styles.edgeDrawerHitbox}
         />
         </View>
@@ -1548,7 +1547,7 @@ const styles = StyleSheet.create({
   edgeDrawerHitbox: {
     position: 'absolute',
     top: 0,
-    right: 0,
+    right: EDGE_SWIPE_SYSTEM_GAP,
     bottom: 0,
     width: EDGE_SWIPE_WIDTH,
     zIndex: 12,
