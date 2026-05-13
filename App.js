@@ -38,12 +38,10 @@ const INK = '#1A1A1A';
 const DROP_GUIDE = '#FFDD66';
 const DANGER = '#E5483E';
 const DANGER_SOFT = 'rgba(229,72,62,0.18)';
-const EDGE_SWIPE_WIDTH = 54;
-const EDGE_SWIPE_ZONE_WIDTH = 126;
-const EDGE_SWIPE_SYSTEM_GAP = 0;
-const EDGE_SWIPE_TRIGGER = 34;
-const EDGE_DRAWER_MAX_WIDTH = 224;
-const EDGE_DRAWER_MIN_WIDTH = 184;
+const DRAWER_SWIPE_TRIGGER = 72;
+const DRAWER_CLOSE_TRIGGER = 38;
+const DRAWER_WIDTH = 64;
+const DRAWER_HEIGHT = 216;
 
 const MOTION = {
   enter: 150,
@@ -83,6 +81,35 @@ const TASK_DIVIDER_COLORS = {
   q3: 'rgba(26,26,26,0.14)',
   q4: 'rgba(26,26,26,0.16)',
 };
+
+function TodayIcon() {
+  return (
+    <View style={styles.todayIcon}>
+      <View style={styles.todayIconCell} />
+      <View style={styles.todayIconCell} />
+      <View style={styles.todayIconCell} />
+      <View style={styles.todayIconCell} />
+    </View>
+  );
+}
+
+function HistoryIcon() {
+  return (
+    <View style={styles.historyIcon}>
+      <View style={styles.historyIconHour} />
+      <View style={styles.historyIconMinute} />
+    </View>
+  );
+}
+
+function BackIcon() {
+  return (
+    <View style={styles.backIcon}>
+      <View style={[styles.backIconLine, styles.backIconLineTop]} />
+      <View style={[styles.backIconLine, styles.backIconLineBottom]} />
+    </View>
+  );
+}
 
 function getNextId(tasks) {
   return Math.max(0, ...Object.values(tasks).flat().map(task => Number(task.id) || 0)) + 1;
@@ -727,7 +754,7 @@ function EisenhowerApp() {
     const { pageX, pageY } = event.nativeEvent;
     const dx = pageX - gesture.startX;
     const dy = pageY - gesture.startY;
-    if (dx >= EDGE_SWIPE_TRIGGER && Math.abs(dy) < EDGE_SWIPE_TRIGGER * 1.7) {
+    if (dx >= DRAWER_CLOSE_TRIGGER && Math.abs(dy) < DRAWER_CLOSE_TRIGGER * 1.7) {
       drawerGesture.current.active = false;
       closeDrawer();
     }
@@ -737,26 +764,24 @@ function EisenhowerApp() {
     drawerGesture.current.active = false;
   };
 
-  const isDrawerSwipeStart = useCallback((x) => {
-    const rect = shellRect.current;
-    const width = rect.width || Math.min(windowWidth || 430, 430);
-    const right = (rect.x || 0) + width;
-    return x >= right - EDGE_SWIPE_ZONE_WIDTH && x <= right - EDGE_SWIPE_SYSTEM_GAP;
-  }, [windowWidth]);
+  const isOpenDrawerSwipe = useCallback((gestureState) => {
+    const dx = gestureState.dx || 0;
+    const dy = gestureState.dy || 0;
+    return dx <= -DRAWER_SWIPE_TRIGGER && Math.abs(dx) > Math.abs(dy) * 1.35;
+  }, []);
 
   const drawerPanResponder = useMemo(() => PanResponder.create({
     onMoveShouldSetPanResponderCapture: (event, gestureState) => {
       if (drawerOpen || dragging || composer) return false;
-      if (!isDrawerSwipeStart(gestureState.x0)) return false;
-      return gestureState.dx <= -8 && Math.abs(gestureState.dy) <= 22;
+      return isOpenDrawerSwipe(gestureState);
     },
     onPanResponderMove: (event, gestureState) => {
-      if (gestureState.dx <= -EDGE_SWIPE_TRIGGER && Math.abs(gestureState.dy) <= EDGE_SWIPE_TRIGGER * 1.6) {
+      if (isOpenDrawerSwipe(gestureState)) {
         openDrawer();
       }
     },
     onPanResponderTerminationRequest: () => true,
-  }), [composer, drawerOpen, dragging, isDrawerSwipeStart, openDrawer]);
+  }), [composer, drawerOpen, dragging, isOpenDrawerSwipe, openDrawer]);
 
   const openComposer = (qid, task = null) => {
     if (drawerOpen) closeDrawer(false);
@@ -982,7 +1007,6 @@ function EisenhowerApp() {
   const composerMode = composer?.taskId ? 'Edit task' : 'New task';
   const shellWidth = shellRect.current.width || Math.min(windowWidth || 430, 430);
   const dragGhostWidth = Math.max(132, Math.min(172, shellWidth / 2 - 28));
-  const drawerWidth = Math.max(EDGE_DRAWER_MIN_WIDTH, Math.min(EDGE_DRAWER_MAX_WIDTH, shellWidth * 0.54));
 
   const getDropMarkerTop = (qid, index) => {
     if (!Number.isInteger(index)) return null;
@@ -1096,18 +1120,6 @@ function EisenhowerApp() {
 
         </View>
 
-        <Pressable
-          accessibilityLabel="Open drawer"
-          accessibilityRole="button"
-          testID="edge-drawer-hitbox"
-          pointerEvents={drawerOpen || dragging || composer ? 'none' : 'auto'}
-          onPress={openDrawer}
-          onPressIn={openDrawer}
-          style={styles.edgeDrawerHitbox}
-        >
-          <View style={styles.edgeDrawerHandle} />
-        </Pressable>
-
         {drawerOpen && (
           <SafeAreaView testID="edge-drawer" style={styles.drawerLayer} edges={['top', 'bottom', 'right']}>
             <AnimatedPressable
@@ -1128,10 +1140,11 @@ function EisenhowerApp() {
               style={[
                 styles.drawerPanel,
                 {
-                  width: drawerWidth,
-                  paddingTop: 14 + insets.top,
-                  paddingBottom: 14 + insets.bottom,
-                  transform: [{ translateX: drawerAnim.interpolate({ inputRange: [0, 1], outputRange: [drawerWidth, 0] }) }],
+                  transform: [
+                    { translateY: -DRAWER_HEIGHT / 2 },
+                    { translateX: drawerAnim.interpolate({ inputRange: [0, 1], outputRange: [DRAWER_WIDTH + 18, 0] }) },
+                    { scale: drawerAnim.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) },
+                  ],
                 },
               ]}
             >
@@ -1142,39 +1155,35 @@ function EisenhowerApp() {
                     accessibilityLabel="Back to drawer menu"
                     testID="drawer-history-back"
                     onPress={() => setDrawerView('menu')}
-                    style={({ pressed }) => [styles.drawerBackButton, pressed && styles.pressed]}
+                    style={({ pressed }) => [styles.drawerIconButton, pressed && styles.drawerIconButtonPressed]}
                   >
-                    <Text style={styles.drawerBackText}>Back</Text>
+                    <BackIcon />
                   </Pressable>
-                  <Text style={styles.drawerTitle}>History</Text>
-                  <Text style={styles.drawerBodyText}>Saved days will appear here after daily reset is added.</Text>
-                  <View style={styles.drawerEmptyBox}>
-                    <Text style={styles.drawerEmptyText}>No saved days yet</Text>
+                  <View testID="drawer-history-empty" style={styles.drawerHistoryEmpty}>
+                    <HistoryIcon />
+                    <View style={styles.drawerHistoryLine} />
+                    <View style={[styles.drawerHistoryLine, styles.drawerHistoryLineShort]} />
                   </View>
                 </>
               ) : (
                 <>
-                  <Text style={styles.drawerTitle}>Menu</Text>
-                  <Text style={styles.drawerBodyText}>Swipe right or tap outside to return to the matrix.</Text>
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="Show today"
                     testID="drawer-today-action"
                     onPress={() => closeDrawer()}
-                    style={({ pressed }) => [styles.drawerAction, pressed && styles.pressed]}
+                    style={({ pressed }) => [styles.drawerIconButton, styles.drawerIconButtonActive, pressed && styles.drawerIconButtonPressed]}
                   >
-                    <Text style={styles.drawerActionTitle}>Today</Text>
-                    <Text style={styles.drawerActionMeta}>Current matrix</Text>
+                    <TodayIcon />
                   </Pressable>
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="Show history"
                     testID="drawer-history-action"
                     onPress={() => setDrawerView('history')}
-                    style={({ pressed }) => [styles.drawerAction, pressed && styles.pressed]}
+                    style={({ pressed }) => [styles.drawerIconButton, pressed && styles.drawerIconButtonPressed]}
                   >
-                    <Text style={styles.drawerActionTitle}>History</Text>
-                    <Text style={styles.drawerActionMeta}>Daily archive</Text>
+                    <HistoryIcon />
                   </Pressable>
                 </>
               )}
@@ -1549,25 +1558,6 @@ const styles = StyleSheet.create({
     fontFamily: 'Nunito_900Black',
     fontSize: 12,
   },
-  edgeDrawerHitbox: {
-    position: 'absolute',
-    top: 0,
-    right: EDGE_SWIPE_SYSTEM_GAP,
-    bottom: 0,
-    width: EDGE_SWIPE_WIDTH,
-    zIndex: 38,
-    elevation: 12,
-    alignItems: 'flex-end',
-    justifyContent: 'center',
-  },
-  edgeDrawerHandle: {
-    width: 4,
-    height: 76,
-    borderTopLeftRadius: 4,
-    borderBottomLeftRadius: 4,
-    backgroundColor: DROP_GUIDE,
-    opacity: 0.78,
-  },
   drawerLayer: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 40,
@@ -1575,78 +1565,116 @@ const styles = StyleSheet.create({
   },
   drawerBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(26,26,26,0.14)',
+    backgroundColor: 'transparent',
   },
   drawerPanel: {
     position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
+    top: '50%',
+    right: 10,
+    width: DRAWER_WIDTH,
+    height: DRAWER_HEIGHT,
     backgroundColor: '#FFFFFF',
-    borderLeftWidth: StyleSheet.hairlineWidth,
-    borderLeftColor: 'rgba(26,26,26,0.16)',
-    paddingHorizontal: 12,
-  },
-  drawerTitle: {
-    color: INK,
-    fontFamily: 'Nunito_900Black',
-    fontSize: 18,
-    lineHeight: 22,
-    marginBottom: 8,
-  },
-  drawerBodyText: {
-    color: 'rgba(26,26,26,0.52)',
-    fontFamily: 'Nunito_600SemiBold',
-    fontSize: 11,
-    lineHeight: 15,
-    marginBottom: 14,
-  },
-  drawerAction: {
-    minHeight: 54,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(26,26,26,0.12)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(26,26,26,0.18)',
+    borderRadius: 8,
+    paddingVertical: 8,
+    alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 9,
+    gap: 8,
   },
-  drawerActionTitle: {
-    color: INK,
-    fontFamily: 'Nunito_800ExtraBold',
-    fontSize: 14,
-    lineHeight: 18,
-  },
-  drawerActionMeta: {
-    color: 'rgba(26,26,26,0.45)',
-    fontFamily: 'Nunito_600SemiBold',
-    fontSize: 10,
-    lineHeight: 13,
-    marginTop: 1,
-  },
-  drawerBackButton: {
-    alignSelf: 'flex-start',
-    minHeight: 42,
+  drawerIconButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(26,26,26,0.14)',
   },
-  drawerBackText: {
-    color: INK,
-    fontFamily: 'Nunito_800ExtraBold',
-    fontSize: 12,
-    lineHeight: 16,
+  drawerIconButtonActive: {
+    backgroundColor: DROP_GUIDE,
+    borderColor: DROP_GUIDE,
   },
-  drawerEmptyBox: {
-    minHeight: 76,
+  drawerIconButtonPressed: {
+    opacity: 0.58,
+  },
+  todayIcon: {
+    width: 22,
+    height: 22,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+  },
+  todayIconCell: {
+    width: 9,
+    height: 9,
+    borderWidth: 1.4,
+    borderColor: INK,
+  },
+  historyIcon: {
+    width: 25,
+    height: 25,
+    borderRadius: 13,
+    borderWidth: 1.6,
+    borderColor: INK,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  historyIconHour: {
+    position: 'absolute',
+    width: 1.6,
+    height: 7,
+    backgroundColor: INK,
+    top: 6,
+    left: 11,
+  },
+  historyIconMinute: {
+    position: 'absolute',
+    width: 7,
+    height: 1.6,
+    backgroundColor: INK,
+    top: 12,
+    left: 11,
+  },
+  backIcon: {
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+  },
+  backIconLine: {
+    position: 'absolute',
+    left: 7,
+    width: 11,
+    height: 1.8,
+    borderRadius: 1,
+    backgroundColor: INK,
+  },
+  backIconLineTop: {
+    transform: [{ rotate: '-42deg' }],
+    top: 8,
+  },
+  backIconLineBottom: {
+    transform: [{ rotate: '42deg' }],
+    bottom: 8,
+  },
+  drawerHistoryEmpty: {
+    width: 48,
+    height: 92,
+    borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(26,26,26,0.14)',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 10,
+    gap: 8,
   },
-  drawerEmptyText: {
-    color: 'rgba(26,26,26,0.46)',
-    fontFamily: 'Nunito_700Bold',
-    fontSize: 11,
-    lineHeight: 15,
-    textAlign: 'center',
+  drawerHistoryLine: {
+    width: 24,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: 'rgba(26,26,26,0.24)',
+  },
+  drawerHistoryLineShort: {
+    width: 15,
   },
   composerSafe: {
     ...StyleSheet.absoluteFillObject,

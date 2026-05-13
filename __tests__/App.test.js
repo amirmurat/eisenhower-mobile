@@ -118,16 +118,13 @@ describe('task composer', () => {
     expect(screen.getByTestId('task-3')).not.toHaveStyle({ borderBottomWidth: StyleSheet.hairlineWidth });
   });
 
-  test('opens the right edge drawer fallback and shows the history prototype', async () => {
+  test('exposes a full-screen drawer gesture layer without a visible handle fallback', async () => {
     render(<App />);
 
-    const edge = await screen.findByTestId('edge-drawer-hitbox');
+    const gestureLayer = await screen.findByTestId('matrix-gesture-layer');
 
-    fireEvent.press(edge);
-
-    expect(await screen.findByTestId('edge-drawer')).toBeOnTheScreen();
-    fireEvent.press(screen.getByTestId('drawer-history-action'));
-
-    expect(screen.getByText('No saved days yet')).toBeOnTheScreen();
+    expect(typeof gestureLayer.props.onMoveShouldSetResponderCapture).toBe('function');
+    expect(typeof gestureLayer.props.onResponderMove).toBe('function');
+    expect(screen.queryByTestId('edge-drawer-hitbox')).not.toBeOnTheScreen();
   });
 });
