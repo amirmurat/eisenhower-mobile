@@ -4,6 +4,19 @@ import { StyleSheet } from 'react-native';
 
 import App from '../App';
 
+const STORAGE_KEY = 'eisenhower-mobile.tasks.v1';
+const HISTORY_KEY = 'eisenhower-mobile.history.v1';
+const ACTIVE_DAY_KEY = 'eisenhower-mobile.activeDay.v1';
+
+function dayKeyForOffset(offset) {
+  const date = new Date();
+  date.setDate(date.getDate() + offset);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 describe('task composer', () => {
   beforeEach(async () => {
     await AsyncStorage.clear();
@@ -126,5 +139,36 @@ describe('task composer', () => {
     expect(gestureLayer).toBeOnTheScreen();
     expect(screen.queryByTestId('edge-drawer')).not.toBeOnTheScreen();
     expect(screen.queryByTestId('edge-drawer-hitbox')).not.toBeOnTheScreen();
+  });
+
+  test('archives a stored previous day and starts the current day empty', async () => {
+    const yesterday = dayKeyForOffset(-1);
+    await AsyncStorage.setItem(ACTIVE_DAY_KEY, yesterday);
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({
+      q1: [{ id: 101, text: 'Yesterday urgent task', done: false }],
+      q2: [],
+      q3: [],
+      q4: [],
+    }));
+
+    render(<App />);
+
+    await waitFor(async () => {
+      const rawHistory = await AsyncStorage.getItem(HISTORY_KEY);
+      expect(JSON.parse(rawHistory)).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          dayKey: yesterday,
+          total: 1,
+          tasks: expect.objectContaining({
+            q1: [expect.objectContaining({ text: 'Yesterday urgent task' })],
+          }),
+        }),
+      ]));
+    });
+
+    await waitFor(async () => {
+      expect(await AsyncStorage.getItem(ACTIVE_DAY_KEY)).toBe(dayKeyForOffset(0));
+    });
+    expect(screen.queryByText('Yesterday urgent task')).not.toBeOnTheScreen();
   });
 });

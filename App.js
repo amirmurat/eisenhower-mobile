@@ -4,6 +4,7 @@ import { useFonts } from 'expo-font';
 import { StatusBar } from 'expo-status-bar';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AppState,
   Animated,
   Easing,
   FlatList,
@@ -23,6 +24,9 @@ import Reanimated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } fro
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const STORAGE_KEY = 'eisenhower-mobile.tasks.v1';
+const HISTORY_KEY = 'eisenhower-mobile.history.v1';
+const ACTIVE_DAY_KEY = 'eisenhower-mobile.activeDay.v1';
+const MAX_HISTORY_DAYS = 90;
 const DELETE_TARGET_HEIGHT = 76;
 const DELETE_BAR_HEIGHT = 30;
 const AUTO_SCROLL_EDGE = 46;
@@ -115,6 +119,108 @@ function getNextId(tasks) {
 
 function isValidTasks(value) {
   return value && QUADS.every(q => Array.isArray(value[q.id]));
+}
+
+function createEmptyTasks() {
+  return QUADS.reduce((next, q) => {
+    next[q.id] = [];
+    return next;
+  }, {});
+}
+
+function getLocalDayKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function getRelativeDayKey(offset) {
+  const date = new Date();
+  date.setDate(date.getDate() + offset);
+  return getLocalDayKey(date);
+}
+
+function getTaskCount(tasks) {
+  if (!isValidTasks(tasks)) return 0;
+  return QUADS.reduce((total, q) => total + tasks[q.id].length, 0);
+}
+
+function getDoneCount(tasks) {
+  if (!isValidTasks(tasks)) return 0;
+  return QUADS.reduce((total, q) => total + tasks[q.id].filter(task => task.done).length, 0);
+}
+
+function hasAnyTasks(tasks) {
+  return getTaskCount(tasks) > 0;
+}
+
+function getQuadCounts(tasks) {
+  return QUADS.reduce((counts, q) => {
+    counts[q.id] = Array.isArray(tasks?.[q.id]) ? tasks[q.id].length : 0;
+    return counts;
+  }, {});
+}
+
+function normalizeTasks(tasks) {
+  const normalized = QUADS.reduce((next, q) => {
+    next[q.id] = Array.isArray(tasks?.[q.id]) ? tasks[q.id] : [];
+    return next;
+  }, {});
+  return orderAllTasksByDone(normalized);
+}
+
+function createHistoryEntry(dayKey, tasks, archivedAt = new Date().toISOString()) {
+  const snapshot = normalizeTasks(tasks);
+  return {
+    id: dayKey,
+    dayKey,
+    archivedAt,
+    total: getTaskCount(snapshot),
+    done: getDoneCount(snapshot),
+    counts: getQuadCounts(snapshot),
+    tasks: snapshot,
+  };
+}
+
+function normalizeHistoryEntry(entry) {
+  if (!entry?.dayKey || !isValidTasks(entry.tasks)) return null;
+  return createHistoryEntry(entry.dayKey, entry.tasks, entry.archivedAt || new Date().toISOString());
+}
+
+function normalizeHistory(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(normalizeHistoryEntry)
+    .filter(Boolean)
+    .sort((a, b) => b.dayKey.localeCompare(a.dayKey))
+    .slice(0, MAX_HISTORY_DAYS);
+}
+
+function upsertHistoryEntry(history, entry) {
+  return [entry, ...history.filter(item => item.dayKey !== entry.dayKey)]
+    .sort((a, b) => b.dayKey.localeCompare(a.dayKey))
+    .slice(0, MAX_HISTORY_DAYS);
+}
+
+function parseDayKey(dayKey) {
+  const [year, month, day] = String(dayKey).split('-').map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day);
+}
+
+function formatHistoryDate(dayKey) {
+  if (dayKey === getLocalDayKey()) return 'Today';
+  if (dayKey === getRelativeDayKey(-1)) return 'Yesterday';
+  const date = parseDayKey(dayKey);
+  if (!date) return dayKey;
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function formatHistoryLongDate(dayKey) {
+  const date = parseDayKey(dayKey);
+  if (!date) return dayKey;
+  return date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 }
 
 function getVirtualDropSlots(list, qid, currentDragging, layouts = {}) {
@@ -435,6 +541,214 @@ const QuadrantTile = memo(function QuadrantTile({
   prev.q.id === next.q.id
 ));
 
+function HistoryCountPill({ quadId, count }) {
+  const color = COLORS[quadId];
+  const isDark = quadId === 'q1';
+  return (
+    <View style={[styles.historyCountPill, { backgroundColor: color.bg, borderColor: isDark ? color.bg : HAIRLINE_DARK }]}>
+      <Text style={[styles.historyCountText, { color: color.fg }]}>{count}</Text>
+    </View>
+  );
+}
+
+function HistoryEntryRow({ entry, onPress }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Open history for ${formatHistoryLongDate(entry.dayKey)}`}
+      testID={`history-entry-${entry.dayKey}`}
+      onPress={onPress}
+      style={({ pressed }) => [styles.historyRow, pressed && styles.historyPressed]}
+    >
+      <View style={styles.historyRowHeader}>
+        <View style={styles.historyRowText}>
+          <Text style={styles.historyRowTitle}>{formatHistoryDate(entry.dayKey)}</Text>
+          <Text style={styles.historyRowMeta}>{entry.total} tasks - {entry.done} done</Text>
+        </View>
+        <Ionicons name="chevron-forward-outline" size={21} color="rgba(22,22,22,0.44)" />
+      </View>
+      <View style={styles.historyCountRow}>
+        {QUADS.map(q => (
+          <HistoryCountPill key={q.id} quadId={q.id} count={entry.counts?.[q.id] || 0} />
+        ))}
+      </View>
+    </Pressable>
+  );
+}
+
+function HistoryEmptyState() {
+  return (
+    <View testID="history-empty" style={styles.historyEmpty}>
+      <Ionicons name="file-tray-outline" size={28} color="rgba(22,22,22,0.34)" />
+      <Text style={styles.historyEmptyTitle}>No archived days yet</Text>
+      <Text style={styles.historyEmptyText}>Archive today when you want a clean matrix and a saved record.</Text>
+    </View>
+  );
+}
+
+function HistoryTaskRow({ task, quadId, isLast }) {
+  const color = COLORS[quadId];
+  const done = !!task.done;
+  return (
+    <View style={[styles.historyTaskRow, !isLast && { borderBottomColor: getTaskDividerColor(quadId), borderBottomWidth: StyleSheet.hairlineWidth }]}>
+      <View
+        style={[
+          styles.historyTaskCheck,
+          { borderColor: done ? color.check : quadId === 'q1' ? 'rgba(255,255,255,0.38)' : 'rgba(22,22,22,0.26)' },
+          done && { backgroundColor: color.check },
+        ]}
+      />
+      <Text style={[styles.historyTaskText, { color: done ? color.done : color.fg }, done && styles.doneText]}>{task.text}</Text>
+    </View>
+  );
+}
+
+function HistoryQuadSection({ q, tasks }) {
+  const color = COLORS[q.id];
+  return (
+    <View style={[styles.historyQuadSection, { backgroundColor: color.bg }]}>
+      <View style={styles.historyQuadHeader}>
+        <View style={styles.historyQuadTitleGroup}>
+          <Text style={[styles.historyQuadTitle, { color: color.fg }]}>{q.title}</Text>
+          <Text style={[styles.historyQuadDesc, { color: color.muted }]}>{q.desc}</Text>
+        </View>
+        <Text style={[styles.historyQuadCount, { color: color.fg }]}>{tasks.length}</Text>
+      </View>
+      {tasks.length === 0 ? (
+        <Text style={[styles.historyQuadEmpty, { color: color.muted }]}>No tasks</Text>
+      ) : (
+        tasks.map((task, index) => (
+          <HistoryTaskRow
+            key={task.id}
+            task={task}
+            quadId={q.id}
+            isLast={index === tasks.length - 1}
+          />
+        ))
+      )}
+    </View>
+  );
+}
+
+function HistoryDetail({ entry, onBackToList, onBackToToday }) {
+  return (
+    <SafeAreaView testID="history-detail-screen" style={styles.historyScreen} edges={['top', 'right', 'bottom', 'left']}>
+      <View style={styles.historyHeader}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Back to history"
+          testID="history-detail-back"
+          onPress={onBackToList}
+          style={({ pressed }) => [styles.historyHeaderButton, pressed && styles.historyPressed]}
+        >
+          <BackIcon />
+        </Pressable>
+        <View style={styles.historyHeaderText}>
+          <Text style={styles.historyTitle}>{formatHistoryDate(entry.dayKey)}</Text>
+          <Text style={styles.historySubtitle}>{entry.total} tasks - {entry.done} done</Text>
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Show today"
+          testID="history-detail-today"
+          onPress={onBackToToday}
+          style={({ pressed }) => [styles.historyHeaderButton, pressed && styles.historyPressed]}
+        >
+          <TodayIcon />
+        </Pressable>
+      </View>
+      <FlatList
+        data={QUADS}
+        keyExtractor={q => q.id}
+        renderItem={({ item }) => <HistoryQuadSection q={item} tasks={entry.tasks[item.id] || []} />}
+        contentContainerStyle={styles.historyDetailContent}
+        showsVerticalScrollIndicator={false}
+      />
+    </SafeAreaView>
+  );
+}
+
+function HistoryScreen({
+  history,
+  tasks,
+  selectedEntry,
+  onArchiveToday,
+  onBackToToday,
+  onOpenEntry,
+  onBackToList,
+}) {
+  const todayTotal = getTaskCount(tasks);
+  const todayDone = getDoneCount(tasks);
+
+  if (selectedEntry) {
+    return (
+      <HistoryDetail
+        entry={selectedEntry}
+        onBackToList={onBackToList}
+        onBackToToday={onBackToToday}
+      />
+    );
+  }
+
+  const renderHistoryHeader = () => (
+    <>
+      <View testID="history-today-card" style={styles.historyTodayCard}>
+        <View style={styles.historyTodayText}>
+          <Text style={styles.historyTodayTitle}>Today</Text>
+          <Text style={styles.historyTodayMeta}>
+            {todayTotal > 0 ? `${todayTotal} tasks - ${todayDone} done` : 'Matrix is clear'}
+          </Text>
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Archive and clear today"
+          testID="history-archive-today"
+          disabled={todayTotal === 0}
+          onPress={onArchiveToday}
+          style={({ pressed }) => [
+            styles.historyArchiveButton,
+            todayTotal === 0 && styles.historyArchiveButtonDisabled,
+            pressed && todayTotal > 0 && styles.historyPressed,
+          ]}
+        >
+          <Ionicons name="archive-outline" size={18} color="#fff" />
+          <Text style={styles.historyArchiveText}>Archive & clear</Text>
+        </Pressable>
+      </View>
+      <Text style={styles.historySectionLabel}>Archived days</Text>
+    </>
+  );
+
+  return (
+    <SafeAreaView testID="history-screen" style={styles.historyScreen} edges={['top', 'right', 'bottom', 'left']}>
+      <View style={styles.historyHeader}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Back to today"
+          testID="history-back-today"
+          onPress={onBackToToday}
+          style={({ pressed }) => [styles.historyHeaderButton, pressed && styles.historyPressed]}
+        >
+          <BackIcon />
+        </Pressable>
+        <View style={styles.historyHeaderText}>
+          <Text style={styles.historyTitle}>History</Text>
+          <Text style={styles.historySubtitle}>Saved days and cleared matrices</Text>
+        </View>
+      </View>
+      <FlatList
+        data={history}
+        keyExtractor={entry => entry.id}
+        renderItem={({ item }) => <HistoryEntryRow entry={item} onPress={() => onOpenEntry(item.id)} />}
+        ListHeaderComponent={renderHistoryHeader}
+        ListEmptyComponent={HistoryEmptyState}
+        contentContainerStyle={styles.historyListContent}
+        showsVerticalScrollIndicator={false}
+      />
+    </SafeAreaView>
+  );
+}
+
 function EisenhowerApp() {
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
@@ -445,6 +759,10 @@ function EisenhowerApp() {
     Nunito_900Black: require('@expo-google-fonts/nunito/900Black/Nunito_900Black.ttf'),
   });
   const [tasks, setTasks] = useState(INIT);
+  const [history, setHistory] = useState([]);
+  const [activeDay, setActiveDay] = useState(getLocalDayKey());
+  const [screen, setScreen] = useState('today');
+  const [selectedHistoryId, setSelectedHistoryId] = useState(null);
   const [nextId, setNextId] = useState(getNextId(INIT));
   const [composer, setComposer] = useState(null);
   const [addVal, setAddVal] = useState('');
@@ -494,16 +812,42 @@ function EisenhowerApp() {
   tasksRef.current = tasks;
 
   useEffect(() => {
-    AsyncStorage.getItem(STORAGE_KEY)
-      .then(value => {
-        if (!value) return;
-        const parsed = JSON.parse(value);
-        if (!isValidTasks(parsed)) return;
-        setTasks(orderAllTasksByDone(parsed));
-        setNextId(getNextId(parsed));
+    let mounted = true;
+
+    Promise.all([
+      AsyncStorage.getItem(STORAGE_KEY),
+      AsyncStorage.getItem(HISTORY_KEY),
+      AsyncStorage.getItem(ACTIVE_DAY_KEY),
+    ])
+      .then(([taskValue, historyValue, dayValue]) => {
+        if (!mounted) return;
+        const todayKey = getLocalDayKey();
+        const storedTasks = taskValue ? JSON.parse(taskValue) : null;
+        const storedHistory = historyValue ? JSON.parse(historyValue) : [];
+        let nextTasks = isValidTasks(storedTasks) ? normalizeTasks(storedTasks) : INIT;
+        let nextHistory = normalizeHistory(storedHistory);
+        const storedDay = typeof dayValue === 'string' && dayValue ? dayValue : todayKey;
+
+        if (storedDay !== todayKey) {
+          if (isValidTasks(storedTasks) && hasAnyTasks(nextTasks)) {
+            nextHistory = upsertHistoryEntry(nextHistory, createHistoryEntry(storedDay, nextTasks));
+          }
+          nextTasks = createEmptyTasks();
+        }
+
+        setTasks(nextTasks);
+        setHistory(nextHistory);
+        setActiveDay(todayKey);
+        setNextId(getNextId(nextTasks));
       })
       .catch(() => {})
-      .finally(() => setLoaded(true));
+      .finally(() => {
+        if (mounted) setLoaded(true);
+      });
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -517,6 +861,42 @@ function EisenhowerApp() {
       });
     }, PERSIST_DELAY);
   }, [loaded, tasks]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    InteractionManager.runAfterInteractions(() => {
+      AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(history)).catch(() => {});
+    });
+  }, [history, loaded]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    AsyncStorage.setItem(ACTIVE_DAY_KEY, activeDay).catch(() => {});
+  }, [activeDay, loaded]);
+
+  const archiveAndResetForNewDay = useCallback(() => {
+    const todayKey = getLocalDayKey();
+    if (activeDay === todayKey) return;
+    const snapshot = tasksRef.current;
+    if (hasAnyTasks(snapshot)) {
+      const entry = createHistoryEntry(activeDay, snapshot);
+      setHistory(prev => upsertHistoryEntry(prev, entry));
+      setSelectedHistoryId(null);
+    }
+    setTasks(createEmptyTasks());
+    setNextId(1);
+    setActiveDay(todayKey);
+    setLastDeleted(null);
+    clearTimeout(undoTimer.current);
+  }, [activeDay]);
+
+  useEffect(() => {
+    if (!loaded) return undefined;
+    const subscription = AppState.addEventListener('change', nextState => {
+      if (nextState === 'active') archiveAndResetForNewDay();
+    });
+    return () => subscription.remove();
+  }, [archiveAndResetForNewDay, loaded]);
 
   useEffect(() => {
     trashAnim.stopAnimation();
@@ -739,7 +1119,7 @@ function EisenhowerApp() {
   }, [drawerProgress, finishCloseDrawer]);
 
   const openDrawerGesture = useMemo(() => Gesture.Pan()
-    .enabled(!dragging && !composer)
+    .enabled(screen === 'today' && !dragging && !composer)
     .activeOffsetX([-10, 9999])
     .failOffsetY([-24, 24])
     .onStart(() => {
@@ -754,7 +1134,7 @@ function EisenhowerApp() {
       drawerProgress.value = withTiming(shouldOpen ? 1 : 0, { duration: shouldOpen ? MOTION.enter : MOTION.exit }, finished => {
         if (finished && !shouldOpen) runOnJS(finishCloseDrawer)();
       });
-    }), [composer, drawerProgress, dragging, finishCloseDrawer, showDrawerForGesture]);
+    }), [composer, drawerProgress, dragging, finishCloseDrawer, screen, showDrawerForGesture]);
 
   const closeDrawerGesture = useMemo(() => Gesture.Pan()
     .enabled(drawerOpen)
@@ -818,6 +1198,33 @@ function EisenhowerApp() {
       if (finished) finish();
     });
   };
+
+  const showTodayScreen = useCallback(() => {
+    setScreen('today');
+    setSelectedHistoryId(null);
+    if (drawerOpen) closeDrawer();
+  }, [closeDrawer, drawerOpen]);
+
+  const showHistoryScreen = useCallback(() => {
+    Keyboard.dismiss();
+    setScreen('history');
+    setSelectedHistoryId(null);
+    if (drawerOpen) closeDrawer();
+  }, [closeDrawer, drawerOpen]);
+
+  const archiveToday = useCallback(() => {
+    const snapshot = tasksRef.current;
+    if (!hasAnyTasks(snapshot)) return;
+    const entry = createHistoryEntry(activeDay, snapshot);
+    setHistory(prev => upsertHistoryEntry(prev, entry));
+    setTasks(createEmptyTasks());
+    setNextId(1);
+    setLastDeleted(null);
+    clearTimeout(undoTimer.current);
+    setScreen('history');
+    setSelectedHistoryId(entry.id);
+    Keyboard.dismiss();
+  }, [activeDay]);
 
   const toggleTask = (qid, tid) => {
     setTasks(prev => ({
@@ -1004,6 +1411,7 @@ function EisenhowerApp() {
   const activeComposer = composer ? QUADS.find(q => q.id === composer.qid) : null;
   const activeComposerColor = composer ? COLORS[composer.qid] : null;
   const composerMode = composer?.taskId ? 'Edit task' : 'New task';
+  const selectedHistoryEntry = selectedHistoryId ? history.find(entry => entry.id === selectedHistoryId) || null : null;
   const shellWidth = shellRect.current.width || Math.min(windowWidth || 430, 430);
   const dragGhostWidth = Math.max(132, Math.min(172, shellWidth / 2 - 28));
 
@@ -1121,6 +1529,18 @@ function EisenhowerApp() {
           </View>
         </GestureDetector>
 
+        {screen === 'history' && (
+          <HistoryScreen
+            history={history}
+            tasks={tasks}
+            selectedEntry={selectedHistoryEntry}
+            onArchiveToday={archiveToday}
+            onBackToToday={showTodayScreen}
+            onOpenEntry={setSelectedHistoryId}
+            onBackToList={() => setSelectedHistoryId(null)}
+          />
+        )}
+
         {drawerOpen && (
           <SafeAreaView testID="edge-drawer" style={styles.drawerLayer} edges={['top', 'bottom', 'right']}>
             <Reanimated.View style={[styles.drawerBackdrop, drawerBackdropStyle]}>
@@ -1156,8 +1576,8 @@ function EisenhowerApp() {
                       accessibilityRole="button"
                       accessibilityLabel="Show today"
                       testID="drawer-today-action"
-                      onPress={() => closeDrawer()}
-                      style={({ pressed }) => [styles.drawerIconButton, styles.drawerIconButtonActive, pressed && styles.drawerIconButtonPressed]}
+                      onPress={showTodayScreen}
+                      style={({ pressed }) => [styles.drawerIconButton, screen === 'today' && styles.drawerIconButtonActive, pressed && styles.drawerIconButtonPressed]}
                     >
                       <TodayIcon />
                     </Pressable>
@@ -1165,8 +1585,8 @@ function EisenhowerApp() {
                       accessibilityRole="button"
                       accessibilityLabel="Show history"
                       testID="drawer-history-action"
-                      onPress={() => setDrawerView('history')}
-                      style={({ pressed }) => [styles.drawerIconButton, pressed && styles.drawerIconButtonPressed]}
+                      onPress={showHistoryScreen}
+                      style={({ pressed }) => [styles.drawerIconButton, screen === 'history' && styles.drawerIconButtonActive, pressed && styles.drawerIconButtonPressed]}
                     >
                       <HistoryIcon />
                     </Pressable>
@@ -1623,6 +2043,252 @@ const styles = StyleSheet.create({
   },
   drawerHistoryLineShort: {
     width: 15,
+  },
+  historyScreen: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 34,
+    elevation: 8,
+    backgroundColor: APP_SURFACE,
+  },
+  historyHeader: {
+    minHeight: 64,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: HAIRLINE_DARK,
+  },
+  historyHeaderButton: {
+    width: 46,
+    height: 46,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: HAIRLINE_DARK,
+    backgroundColor: PANEL_SURFACE,
+  },
+  historyHeaderText: {
+    flex: 1,
+  },
+  historyTitle: {
+    color: INK,
+    fontFamily: 'Nunito_900Black',
+    fontSize: 20,
+    lineHeight: 25,
+  },
+  historySubtitle: {
+    marginTop: 1,
+    color: 'rgba(22,22,22,0.52)',
+    fontFamily: 'Nunito_700Bold',
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  historyListContent: {
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 24,
+  },
+  historyTodayCard: {
+    minHeight: 82,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: HAIRLINE_DARK,
+    backgroundColor: PANEL_SURFACE,
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  historyTodayText: {
+    flex: 1,
+  },
+  historyTodayTitle: {
+    color: INK,
+    fontFamily: 'Nunito_900Black',
+    fontSize: 16,
+    lineHeight: 20,
+  },
+  historyTodayMeta: {
+    marginTop: 2,
+    color: 'rgba(22,22,22,0.52)',
+    fontFamily: 'Nunito_700Bold',
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  historyArchiveButton: {
+    minHeight: 46,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    backgroundColor: INK,
+  },
+  historyArchiveButtonDisabled: {
+    opacity: 0.28,
+  },
+  historyArchiveText: {
+    color: '#fff',
+    fontFamily: 'Nunito_900Black',
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  historySectionLabel: {
+    marginTop: 18,
+    marginBottom: 8,
+    color: 'rgba(22,22,22,0.48)',
+    fontFamily: 'Nunito_900Black',
+    fontSize: 10,
+    lineHeight: 13,
+    textTransform: 'uppercase',
+    letterSpacing: 0,
+  },
+  historyRow: {
+    minHeight: 96,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: HAIRLINE_DARK,
+    backgroundColor: PANEL_SURFACE,
+    padding: 12,
+    marginBottom: 10,
+  },
+  historyPressed: {
+    opacity: 0.68,
+  },
+  historyRowHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  historyRowText: {
+    flex: 1,
+  },
+  historyRowTitle: {
+    color: INK,
+    fontFamily: 'Nunito_900Black',
+    fontSize: 15,
+    lineHeight: 19,
+  },
+  historyRowMeta: {
+    marginTop: 1,
+    color: 'rgba(22,22,22,0.48)',
+    fontFamily: 'Nunito_700Bold',
+    fontSize: 10.5,
+    lineHeight: 14,
+  },
+  historyCountRow: {
+    marginTop: 12,
+    flexDirection: 'row',
+    gap: 6,
+  },
+  historyCountPill: {
+    minWidth: 34,
+    height: 28,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  historyCountText: {
+    fontFamily: 'Nunito_900Black',
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  historyEmpty: {
+    minHeight: 188,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: HAIRLINE_DARK,
+    backgroundColor: PANEL_SURFACE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  historyEmptyTitle: {
+    marginTop: 10,
+    color: INK,
+    fontFamily: 'Nunito_900Black',
+    fontSize: 15,
+    lineHeight: 19,
+    textAlign: 'center',
+  },
+  historyEmptyText: {
+    marginTop: 5,
+    maxWidth: 260,
+    color: 'rgba(22,22,22,0.48)',
+    fontFamily: 'Nunito_700Bold',
+    fontSize: 11,
+    lineHeight: 15,
+    textAlign: 'center',
+  },
+  historyDetailContent: {
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 24,
+    gap: 10,
+  },
+  historyQuadSection: {
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    overflow: 'hidden',
+  },
+  historyQuadHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 10,
+    paddingBottom: 8,
+  },
+  historyQuadTitleGroup: {
+    flex: 1,
+  },
+  historyQuadTitle: {
+    fontFamily: 'Nunito_900Black',
+    fontSize: 15,
+    lineHeight: 19,
+  },
+  historyQuadDesc: {
+    marginTop: 1,
+    fontFamily: 'Nunito_700Bold',
+    fontSize: 10.5,
+    lineHeight: 14,
+  },
+  historyQuadCount: {
+    fontFamily: 'Nunito_900Black',
+    fontSize: 15,
+    lineHeight: 19,
+  },
+  historyQuadEmpty: {
+    minHeight: 44,
+    paddingTop: 12,
+    fontFamily: 'Nunito_700Bold',
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  historyTaskRow: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  historyTaskCheck: {
+    width: 15,
+    height: 15,
+    borderRadius: 3,
+    borderWidth: 1.4,
+  },
+  historyTaskText: {
+    flex: 1,
+    paddingVertical: 7,
+    fontFamily: 'Nunito_700Bold',
+    fontSize: 12,
+    lineHeight: 16,
   },
   composerSafe: {
     ...StyleSheet.absoluteFillObject,
