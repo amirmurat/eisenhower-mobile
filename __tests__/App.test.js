@@ -131,14 +131,14 @@ describe('task composer', () => {
     expect(screen.getByTestId('task-3')).not.toHaveStyle({ borderBottomWidth: StyleSheet.hairlineWidth });
   });
 
-  test('exposes a full-screen drawer gesture layer without a visible handle fallback', async () => {
+  test('keeps history navigation gesture-first without visible controls', async () => {
     render(<App />);
 
     const gestureLayer = await screen.findByTestId('matrix-gesture-layer');
 
     expect(gestureLayer).toBeOnTheScreen();
-    expect(screen.queryByTestId('edge-drawer')).not.toBeOnTheScreen();
-    expect(screen.queryByTestId('edge-drawer-hitbox')).not.toBeOnTheScreen();
+    expect(screen.queryByTestId('history-slide')).not.toBeOnTheScreen();
+    expect(screen.queryByRole('button', { name: 'Show history' })).not.toBeOnTheScreen();
   });
 
   test('archives a stored previous day and starts the current day empty', async () => {

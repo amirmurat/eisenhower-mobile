@@ -44,15 +44,29 @@ const INK = '#161616';
 const APP_SURFACE = '#F7F7F4';
 const PANEL_SURFACE = '#FAFAF8';
 const HAIRLINE_DARK = 'rgba(22,22,22,0.12)';
-const OVERLAY_TINT = 'rgba(22,22,22,0.06)';
 const DROP_GUIDE = '#F4C430';
 const DANGER = '#D94A3A';
 const DANGER_SOFT = 'rgba(217,74,58,0.16)';
-const DRAWER_SWIPE_TRIGGER = 72;
-const DRAWER_CLOSE_TRIGGER = 38;
-const DRAWER_WIDTH = 60;
-const DRAWER_HEIGHT = 188;
-const DRAWER_OFFSET = DRAWER_WIDTH + 18;
+const HISTORY_OPEN_TRIGGER = 92;
+const HISTORY_CLOSE_TRIGGER = 92;
+
+const TYPE = {
+  screenTitle: { fontFamily: 'Nunito_900Black', fontSize: 26, lineHeight: 32 },
+  screenSubtitle: { fontFamily: 'Nunito_700Bold', fontSize: 11.5, lineHeight: 16 },
+  sectionLabel: { fontFamily: 'Nunito_900Black', fontSize: 10, lineHeight: 13, letterSpacing: 0, textTransform: 'uppercase' },
+  rowTitle: { fontFamily: 'Nunito_900Black', fontSize: 15, lineHeight: 19 },
+  rowMeta: { fontFamily: 'Nunito_700Bold', fontSize: 10.5, lineHeight: 14 },
+  tileTitle: { fontFamily: 'Nunito_800ExtraBold', fontSize: 14, lineHeight: 17 },
+  tileMeta: { fontFamily: 'Nunito_700Bold', fontSize: 9.5, lineHeight: 12.5 },
+  task: { fontFamily: 'Nunito_600SemiBold', fontSize: 11.5, lineHeight: 16 },
+  historyTask: { fontFamily: 'Nunito_700Bold', fontSize: 12, lineHeight: 16 },
+  dragLabel: { fontFamily: 'Nunito_800ExtraBold', fontSize: 12, lineHeight: 16 },
+  button: { fontFamily: 'Nunito_900Black', fontSize: 12, lineHeight: 16 },
+  smallButton: { fontFamily: 'Nunito_900Black', fontSize: 11, lineHeight: 15 },
+  composerTitle: { fontFamily: 'Nunito_800ExtraBold', fontSize: 15, lineHeight: 19 },
+  composerMeta: { fontFamily: 'Nunito_700Bold', fontSize: 10.5, lineHeight: 14 },
+  input: { fontFamily: 'Nunito_600SemiBold', fontSize: 14, lineHeight: 18 },
+};
 
 const MOTION = {
   enter: 150,
@@ -93,24 +107,16 @@ const TASK_DIVIDER_COLORS = {
   q4: 'rgba(22,22,22,0.10)',
 };
 
-function DrawerIcon({ name, size = 23 }) {
+function NavIcon({ name, size = 23 }) {
   return <Ionicons name={name} size={size} color={INK} />;
 }
 
-function TodayIcon() {
-  return <DrawerIcon name="today-outline" />;
-}
-
-function HistoryIcon() {
-  return <DrawerIcon name="time-outline" size={24} />;
-}
-
-function SettingsIcon() {
-  return <DrawerIcon name="settings-outline" size={24} />;
-}
-
 function BackIcon() {
-  return <DrawerIcon name="chevron-back-outline" size={25} />;
+  return <NavIcon name="chevron-back-outline" size={25} />;
+}
+
+function CloseIcon() {
+  return <NavIcon name="close-outline" size={25} />;
 }
 
 function getNextId(tasks) {
@@ -649,12 +655,12 @@ function HistoryDetail({ entry, onBackToList, onBackToToday }) {
         </View>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Show today"
+          accessibilityLabel="Close history"
           testID="history-detail-today"
           onPress={onBackToToday}
           style={({ pressed }) => [styles.historyHeaderButton, pressed && styles.historyPressed]}
         >
-          <TodayIcon />
+          <CloseIcon />
         </Pressable>
       </View>
       <FlatList
@@ -758,6 +764,7 @@ function EisenhowerApp() {
     Nunito_800ExtraBold: require('@expo-google-fonts/nunito/800ExtraBold/Nunito_800ExtraBold.ttf'),
     Nunito_900Black: require('@expo-google-fonts/nunito/900Black/Nunito_900Black.ttf'),
   });
+  const historyWidth = Math.min(windowWidth || 430, 430);
   const [tasks, setTasks] = useState(INIT);
   const [history, setHistory] = useState([]);
   const [activeDay, setActiveDay] = useState(getLocalDayKey());
@@ -770,8 +777,6 @@ function EisenhowerApp() {
   const [dropTarget, setDropTarget] = useState(null);
   const [dropIndex, setDropIndex] = useState(null);
   const [lastDeleted, setLastDeleted] = useState(null);
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [drawerView, setDrawerView] = useState('menu');
   const [loaded, setLoaded] = useState(false);
   const [shellHeight, setShellHeight] = useState(0);
   const shellHeightRef = useRef(0);
@@ -807,7 +812,7 @@ function EisenhowerApp() {
   const deleteHotAnim = useRef(new Animated.Value(0)).current;
   const trashAnim = useRef(new Animated.Value(0)).current;
   const undoAnim = useRef(new Animated.Value(0)).current;
-  const drawerProgress = useSharedValue(0);
+  const historyProgress = useSharedValue(0);
 
   tasksRef.current = tasks;
 
@@ -1091,79 +1096,65 @@ function EisenhowerApp() {
     autoScrollFrame.current = requestAnimationFrame(runAutoScroll);
   };
 
-  const finishCloseDrawer = useCallback(() => {
-    setDrawerOpen(false);
-    setDrawerView('menu');
-  }, []);
-
-  const showDrawerForGesture = useCallback(() => {
+  const mountHistoryForGesture = useCallback(() => {
     Keyboard.dismiss();
-    setDrawerOpen(true);
+    setScreen('history');
+    setSelectedHistoryId(null);
   }, []);
 
-  const openDrawer = useCallback(() => {
-    if (drawerOpen) return;
-    showDrawerForGesture();
-    drawerProgress.value = withTiming(1, { duration: MOTION.enter });
-  }, [drawerOpen, drawerProgress, showDrawerForGesture]);
+  const finishCloseHistory = useCallback(() => {
+    setScreen('today');
+    setSelectedHistoryId(null);
+  }, []);
 
-  const closeDrawer = useCallback((animated = true) => {
+  const closeHistory = useCallback((animated = true) => {
     if (!animated) {
-      drawerProgress.value = 0;
-      finishCloseDrawer();
+      historyProgress.value = 0;
+      finishCloseHistory();
       return;
     }
-    drawerProgress.value = withTiming(0, { duration: MOTION.exit }, finished => {
-      if (finished) runOnJS(finishCloseDrawer)();
+    historyProgress.value = withTiming(0, { duration: MOTION.exit }, finished => {
+      if (finished) runOnJS(finishCloseHistory)();
     });
-  }, [drawerProgress, finishCloseDrawer]);
+  }, [finishCloseHistory, historyProgress]);
 
-  const openDrawerGesture = useMemo(() => Gesture.Pan()
+  const openHistoryGesture = useMemo(() => Gesture.Pan()
     .enabled(screen === 'today' && !dragging && !composer)
-    .activeOffsetX([-10, 9999])
-    .failOffsetY([-24, 24])
-    .onStart(() => {
-      drawerProgress.value = 0;
-      runOnJS(showDrawerForGesture)();
-    })
-    .onUpdate(event => {
-      drawerProgress.value = clamp01(-event.translationX / DRAWER_SWIPE_TRIGGER);
-    })
-    .onEnd(event => {
-      const shouldOpen = drawerProgress.value > 0.42 || event.velocityX < -520;
-      drawerProgress.value = withTiming(shouldOpen ? 1 : 0, { duration: shouldOpen ? MOTION.enter : MOTION.exit }, finished => {
-        if (finished && !shouldOpen) runOnJS(finishCloseDrawer)();
-      });
-    }), [composer, drawerProgress, dragging, finishCloseDrawer, screen, showDrawerForGesture]);
-
-  const closeDrawerGesture = useMemo(() => Gesture.Pan()
-    .enabled(drawerOpen)
     .activeOffsetX([-9999, 10])
     .failOffsetY([-24, 24])
+    .onStart(() => {
+      historyProgress.value = 0;
+      runOnJS(mountHistoryForGesture)();
+    })
     .onUpdate(event => {
-      drawerProgress.value = clamp01(1 - event.translationX / DRAWER_CLOSE_TRIGGER);
+      historyProgress.value = clamp01(event.translationX / HISTORY_OPEN_TRIGGER);
     })
     .onEnd(event => {
-      const shouldClose = drawerProgress.value < 0.58 || event.velocityX > 380;
-      drawerProgress.value = withTiming(shouldClose ? 0 : 1, { duration: shouldClose ? MOTION.exit : MOTION.enter }, finished => {
-        if (finished && shouldClose) runOnJS(finishCloseDrawer)();
+      const shouldOpen = historyProgress.value > 0.42 || event.velocityX > 520;
+      historyProgress.value = withTiming(shouldOpen ? 1 : 0, { duration: shouldOpen ? MOTION.enter : MOTION.exit }, finished => {
+        if (finished && !shouldOpen) runOnJS(finishCloseHistory)();
       });
-    }), [drawerOpen, drawerProgress, finishCloseDrawer]);
+    }), [composer, dragging, finishCloseHistory, historyProgress, mountHistoryForGesture, screen]);
 
-  const drawerBackdropStyle = useAnimatedStyle(() => ({
-    opacity: drawerProgress.value,
-  }));
+  const closeHistoryGesture = useMemo(() => Gesture.Pan()
+    .enabled(screen === 'history')
+    .activeOffsetX([-10, 9999])
+    .failOffsetY([-24, 24])
+    .onUpdate(event => {
+      historyProgress.value = clamp01(1 + event.translationX / HISTORY_CLOSE_TRIGGER);
+    })
+    .onEnd(event => {
+      const shouldClose = historyProgress.value < 0.58 || event.velocityX < -520;
+      historyProgress.value = withTiming(shouldClose ? 0 : 1, { duration: shouldClose ? MOTION.exit : MOTION.enter }, finished => {
+        if (finished && shouldClose) runOnJS(finishCloseHistory)();
+      });
+    }), [finishCloseHistory, historyProgress, screen]);
 
-  const drawerPanelStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateY: -DRAWER_HEIGHT / 2 },
-      { translateX: (1 - drawerProgress.value) * DRAWER_OFFSET },
-      { scale: 0.96 + drawerProgress.value * 0.04 },
-    ],
+  const historyScreenStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: -historyWidth * (1 - historyProgress.value) }],
   }));
 
   const openComposer = (qid, task = null) => {
-    if (drawerOpen) closeDrawer(false);
     composerAnim.stopAnimation();
     setComposer({ qid, taskId: task?.id || null });
     setAddVal(task?.text || '');
@@ -1200,17 +1191,8 @@ function EisenhowerApp() {
   };
 
   const showTodayScreen = useCallback(() => {
-    setScreen('today');
-    setSelectedHistoryId(null);
-    if (drawerOpen) closeDrawer();
-  }, [closeDrawer, drawerOpen]);
-
-  const showHistoryScreen = useCallback(() => {
-    Keyboard.dismiss();
-    setScreen('history');
-    setSelectedHistoryId(null);
-    if (drawerOpen) closeDrawer();
-  }, [closeDrawer, drawerOpen]);
+    closeHistory();
+  }, [closeHistory]);
 
   const archiveToday = useCallback(() => {
     const snapshot = tasksRef.current;
@@ -1223,8 +1205,9 @@ function EisenhowerApp() {
     clearTimeout(undoTimer.current);
     setScreen('history');
     setSelectedHistoryId(entry.id);
+    historyProgress.value = 1;
     Keyboard.dismiss();
-  }, [activeDay]);
+  }, [activeDay, historyProgress]);
 
   const toggleTask = (qid, tid) => {
     setTasks(prev => ({
@@ -1348,7 +1331,6 @@ function EisenhowerApp() {
   };
 
   const beginDrag = (from, task, x, y) => {
-    if (drawerOpen) closeDrawer(false);
     closeComposer(false);
     measureTargets();
     lastHitTestAt.current = 0;
@@ -1445,7 +1427,7 @@ function EisenhowerApp() {
         onLayout={handleShellLayout}
         style={[styles.shell, shellHeight > 0 && { minHeight: shellHeight }]}
       >
-        <GestureDetector gesture={openDrawerGesture}>
+        <GestureDetector gesture={openHistoryGesture}>
           <View testID="matrix-gesture-layer" style={styles.safeLayer}>
             <View style={styles.grid}>
               {QUADS.map(q => (
@@ -1530,80 +1512,19 @@ function EisenhowerApp() {
         </GestureDetector>
 
         {screen === 'history' && (
-          <HistoryScreen
-            history={history}
-            tasks={tasks}
-            selectedEntry={selectedHistoryEntry}
-            onArchiveToday={archiveToday}
-            onBackToToday={showTodayScreen}
-            onOpenEntry={setSelectedHistoryId}
-            onBackToList={() => setSelectedHistoryId(null)}
-          />
-        )}
-
-        {drawerOpen && (
-          <SafeAreaView testID="edge-drawer" style={styles.drawerLayer} edges={['top', 'bottom', 'right']}>
-            <Reanimated.View style={[styles.drawerBackdrop, drawerBackdropStyle]}>
-              <Pressable
-                accessibilityLabel="Close navigation drawer"
-                testID="drawer-backdrop"
-                onPress={() => closeDrawer()}
-                style={styles.drawerBackdropPressable}
+          <GestureDetector gesture={closeHistoryGesture}>
+            <Reanimated.View testID="history-slide" style={[styles.historySlide, historyScreenStyle]}>
+              <HistoryScreen
+                history={history}
+                tasks={tasks}
+                selectedEntry={selectedHistoryEntry}
+                onArchiveToday={archiveToday}
+                onBackToToday={showTodayScreen}
+                onOpenEntry={setSelectedHistoryId}
+                onBackToList={() => setSelectedHistoryId(null)}
               />
             </Reanimated.View>
-            <GestureDetector gesture={closeDrawerGesture}>
-              <Reanimated.View testID="drawer-panel" style={[styles.drawerPanel, drawerPanelStyle]}>
-                {drawerView !== 'menu' ? (
-                  <>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel="Back to drawer menu"
-                      testID={`drawer-${drawerView}-back`}
-                      onPress={() => setDrawerView('menu')}
-                      style={({ pressed }) => [styles.drawerIconButton, pressed && styles.drawerIconButtonPressed]}
-                    >
-                      <BackIcon />
-                    </Pressable>
-                    <View testID={`drawer-${drawerView}-empty`} style={styles.drawerPreview}>
-                      {drawerView === 'history' ? <HistoryIcon /> : <SettingsIcon />}
-                      <View style={styles.drawerHistoryLine} />
-                      <View style={[styles.drawerHistoryLine, styles.drawerHistoryLineShort]} />
-                    </View>
-                  </>
-                ) : (
-                  <>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel="Show today"
-                      testID="drawer-today-action"
-                      onPress={showTodayScreen}
-                      style={({ pressed }) => [styles.drawerIconButton, screen === 'today' && styles.drawerIconButtonActive, pressed && styles.drawerIconButtonPressed]}
-                    >
-                      <TodayIcon />
-                    </Pressable>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel="Show history"
-                      testID="drawer-history-action"
-                      onPress={showHistoryScreen}
-                      style={({ pressed }) => [styles.drawerIconButton, screen === 'history' && styles.drawerIconButtonActive, pressed && styles.drawerIconButtonPressed]}
-                    >
-                      <HistoryIcon />
-                    </Pressable>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel="Show settings"
-                      testID="drawer-settings-action"
-                      onPress={() => setDrawerView('settings')}
-                      style={({ pressed }) => [styles.drawerIconButton, pressed && styles.drawerIconButtonPressed]}
-                    >
-                      <SettingsIcon />
-                    </Pressable>
-                  </>
-                )}
-              </Reanimated.View>
-            </GestureDetector>
-          </SafeAreaView>
+          </GestureDetector>
         )}
 
         {dragging && (
@@ -1828,14 +1749,10 @@ const styles = StyleSheet.create({
   },
   tileTitle: {
     flex: 1,
-    fontFamily: 'Nunito_800ExtraBold',
-    fontSize: 14,
-    lineHeight: 17,
+    ...TYPE.tileTitle,
   },
   tileDesc: {
-    fontFamily: 'Nunito_700Bold',
-    fontSize: 9.5,
-    lineHeight: 12.5,
+    ...TYPE.tileMeta,
     marginTop: 2,
   },
   tileTasks: {
@@ -1881,9 +1798,7 @@ const styles = StyleSheet.create({
   miniText: {
     width: '100%',
     paddingRight: 7,
-    fontFamily: 'Nunito_600SemiBold',
-    fontSize: 11.5,
-    lineHeight: 16,
+    ...TYPE.task,
     textAlignVertical: 'center',
   },
   miniDragArea: {
@@ -1941,9 +1856,7 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   dragGhostText: {
-    fontFamily: 'Nunito_800ExtraBold',
-    fontSize: 12,
-    lineHeight: 16,
+    ...TYPE.dragLabel,
   },
   undo: {
     position: 'absolute',
@@ -1962,8 +1875,7 @@ const styles = StyleSheet.create({
   },
   undoText: {
     color: '#fff',
-    fontFamily: 'Nunito_800ExtraBold',
-    fontSize: 12,
+    ...TYPE.button,
   },
   undoButton: {
     minHeight: 44,
@@ -1975,90 +1887,27 @@ const styles = StyleSheet.create({
   },
   undoButtonText: {
     color: INK,
-    fontFamily: 'Nunito_900Black',
-    fontSize: 12,
+    ...TYPE.button,
   },
-  drawerLayer: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 40,
-    elevation: 12,
-  },
-  drawerBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: OVERLAY_TINT,
-  },
-  drawerBackdropPressable: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  drawerPanel: {
-    position: 'absolute',
-    top: '50%',
-    right: 12,
-    width: DRAWER_WIDTH,
-    height: DRAWER_HEIGHT,
-    backgroundColor: PANEL_SURFACE,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: HAIRLINE_DARK,
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    shadowColor: INK,
-    shadowOpacity: 0.08,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-  },
-  drawerIconButton: {
-    width: 46,
-    height: 46,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(22,22,22,0.10)',
-  },
-  drawerIconButtonActive: {
-    backgroundColor: DROP_GUIDE,
-    borderColor: DROP_GUIDE,
-  },
-  drawerIconButtonPressed: {
-    opacity: 0.68,
-  },
-  drawerPreview: {
-    width: 46,
-    height: 82,
-    borderRadius: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(22,22,22,0.10)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  drawerHistoryLine: {
-    width: 24,
-    height: 2,
-    borderRadius: 1,
-    backgroundColor: 'rgba(22,22,22,0.24)',
-  },
-  drawerHistoryLineShort: {
-    width: 15,
-  },
-  historyScreen: {
+  historySlide: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 34,
     elevation: 8,
+  },
+  historyScreen: {
+    flex: 1,
     backgroundColor: APP_SURFACE,
   },
   historyHeader: {
-    minHeight: 64,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    minHeight: 76,
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    paddingBottom: 10,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: HAIRLINE_DARK,
+    borderBottomColor: 'rgba(22,22,22,0.08)',
   },
   historyHeaderButton: {
     width: 46,
@@ -2075,29 +1924,21 @@ const styles = StyleSheet.create({
   },
   historyTitle: {
     color: INK,
-    fontFamily: 'Nunito_900Black',
-    fontSize: 20,
-    lineHeight: 25,
+    ...TYPE.screenTitle,
   },
   historySubtitle: {
     marginTop: 1,
     color: 'rgba(22,22,22,0.52)',
-    fontFamily: 'Nunito_700Bold',
-    fontSize: 11,
-    lineHeight: 15,
+    ...TYPE.screenSubtitle,
   },
   historyListContent: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     paddingTop: 12,
     paddingBottom: 24,
   },
   historyTodayCard: {
-    minHeight: 82,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: HAIRLINE_DARK,
-    backgroundColor: PANEL_SURFACE,
-    padding: 12,
+    minHeight: 64,
+    paddingVertical: 8,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -2108,20 +1949,16 @@ const styles = StyleSheet.create({
   },
   historyTodayTitle: {
     color: INK,
-    fontFamily: 'Nunito_900Black',
-    fontSize: 16,
-    lineHeight: 20,
+    ...TYPE.rowTitle,
   },
   historyTodayMeta: {
     marginTop: 2,
     color: 'rgba(22,22,22,0.52)',
-    fontFamily: 'Nunito_700Bold',
-    fontSize: 11,
-    lineHeight: 15,
+    ...TYPE.rowMeta,
   },
   historyArchiveButton: {
     minHeight: 46,
-    borderRadius: 10,
+    borderRadius: 8,
     paddingHorizontal: 12,
     flexDirection: 'row',
     alignItems: 'center',
@@ -2134,28 +1971,19 @@ const styles = StyleSheet.create({
   },
   historyArchiveText: {
     color: '#fff',
-    fontFamily: 'Nunito_900Black',
-    fontSize: 11,
-    lineHeight: 15,
+    ...TYPE.smallButton,
   },
   historySectionLabel: {
     marginTop: 18,
     marginBottom: 8,
     color: 'rgba(22,22,22,0.48)',
-    fontFamily: 'Nunito_900Black',
-    fontSize: 10,
-    lineHeight: 13,
-    textTransform: 'uppercase',
-    letterSpacing: 0,
+    ...TYPE.sectionLabel,
   },
   historyRow: {
-    minHeight: 96,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: HAIRLINE_DARK,
-    backgroundColor: PANEL_SURFACE,
-    padding: 12,
-    marginBottom: 10,
+    minHeight: 86,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(22,22,22,0.10)',
   },
   historyPressed: {
     opacity: 0.68,
@@ -2170,16 +1998,12 @@ const styles = StyleSheet.create({
   },
   historyRowTitle: {
     color: INK,
-    fontFamily: 'Nunito_900Black',
-    fontSize: 15,
-    lineHeight: 19,
+    ...TYPE.rowTitle,
   },
   historyRowMeta: {
     marginTop: 1,
     color: 'rgba(22,22,22,0.48)',
-    fontFamily: 'Nunito_700Bold',
-    fontSize: 10.5,
-    lineHeight: 14,
+    ...TYPE.rowMeta,
   },
   historyCountRow: {
     marginTop: 12,
@@ -2189,22 +2013,16 @@ const styles = StyleSheet.create({
   historyCountPill: {
     minWidth: 34,
     height: 28,
-    borderRadius: 8,
+    borderRadius: 7,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
   },
   historyCountText: {
-    fontFamily: 'Nunito_900Black',
-    fontSize: 11,
-    lineHeight: 15,
+    ...TYPE.smallButton,
   },
   historyEmpty: {
     minHeight: 188,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: HAIRLINE_DARK,
-    backgroundColor: PANEL_SURFACE,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 24,
@@ -2212,22 +2030,18 @@ const styles = StyleSheet.create({
   historyEmptyTitle: {
     marginTop: 10,
     color: INK,
-    fontFamily: 'Nunito_900Black',
-    fontSize: 15,
-    lineHeight: 19,
+    ...TYPE.rowTitle,
     textAlign: 'center',
   },
   historyEmptyText: {
     marginTop: 5,
     maxWidth: 260,
     color: 'rgba(22,22,22,0.48)',
-    fontFamily: 'Nunito_700Bold',
-    fontSize: 11,
-    lineHeight: 15,
+    ...TYPE.screenSubtitle,
     textAlign: 'center',
   },
   historyDetailContent: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     paddingTop: 12,
     paddingBottom: 24,
     gap: 10,
@@ -2249,27 +2063,19 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   historyQuadTitle: {
-    fontFamily: 'Nunito_900Black',
-    fontSize: 15,
-    lineHeight: 19,
+    ...TYPE.rowTitle,
   },
   historyQuadDesc: {
     marginTop: 1,
-    fontFamily: 'Nunito_700Bold',
-    fontSize: 10.5,
-    lineHeight: 14,
+    ...TYPE.rowMeta,
   },
   historyQuadCount: {
-    fontFamily: 'Nunito_900Black',
-    fontSize: 15,
-    lineHeight: 19,
+    ...TYPE.rowTitle,
   },
   historyQuadEmpty: {
     minHeight: 44,
     paddingTop: 12,
-    fontFamily: 'Nunito_700Bold',
-    fontSize: 11,
-    lineHeight: 15,
+    ...TYPE.rowMeta,
   },
   historyTaskRow: {
     minHeight: 44,
@@ -2286,9 +2092,7 @@ const styles = StyleSheet.create({
   historyTaskText: {
     flex: 1,
     paddingVertical: 7,
-    fontFamily: 'Nunito_700Bold',
-    fontSize: 12,
-    lineHeight: 16,
+    ...TYPE.historyTask,
   },
   composerSafe: {
     ...StyleSheet.absoluteFillObject,
@@ -2316,14 +2120,10 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   composerTitle: {
-    fontFamily: 'Nunito_800ExtraBold',
-    fontSize: 15,
-    lineHeight: 19,
+    ...TYPE.composerTitle,
   },
   composerDesc: {
-    fontFamily: 'Nunito_700Bold',
-    fontSize: 10.5,
-    lineHeight: 14,
+    ...TYPE.composerMeta,
     marginTop: 1,
     marginBottom: 10,
   },
@@ -2337,8 +2137,7 @@ const styles = StyleSheet.create({
     minHeight: 44,
     borderRadius: 12,
     paddingHorizontal: 14,
-    fontFamily: 'Nunito_600SemiBold',
-    fontSize: 14,
+    ...TYPE.input,
   },
   addButton: {
     width: '100%',
@@ -2353,8 +2152,6 @@ const styles = StyleSheet.create({
   },
   addButtonText: {
     color: '#fff',
-    fontFamily: 'Nunito_800ExtraBold',
-    fontSize: 12,
-    lineHeight: 16,
+    ...TYPE.button,
   },
 });
