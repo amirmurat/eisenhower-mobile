@@ -1,15 +1,16 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import Ionicons from '@expo/vector-icons/Ionicons';
-import { useFonts } from 'expo-font';
-import { StatusBar } from 'expo-status-bar';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import { LinearGradient } from "expo-linear-gradient";
+import { useFonts } from "expo-font";
+import { StatusBar } from "expo-status-bar";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AppState,
   Animated,
   Easing,
   FlatList,
   InteractionManager,
   Keyboard,
+  PanResponder,
   Platform,
   Pressable,
   StyleSheet,
@@ -17,16 +18,22 @@ import {
   TextInput,
   View,
   useWindowDimensions,
-} from 'react-native';
-import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
-import { KeyboardProvider, KeyboardStickyView } from 'react-native-keyboard-controller';
-import Reanimated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
-import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+} from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import {
+  KeyboardProvider,
+  KeyboardStickyView,
+} from "react-native-keyboard-controller";
+import {
+  SafeAreaProvider,
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 
-const STORAGE_KEY = 'eisenhower-mobile.tasks.v1';
-const HISTORY_KEY = 'eisenhower-mobile.history.v1';
-const ACTIVE_DAY_KEY = 'eisenhower-mobile.activeDay.v1';
-const MAX_HISTORY_DAYS = 90;
+const STORAGE_KEY = "eisenhower-mobile.tasks.v1";
+const HISTORY_KEY = "eisenhower-mobile.history.v1";
+const ACTIVE_DAY_KEY = "eisenhower-mobile.activeDay.v1";
+const ARCHIVE_SWIPE_EDGE = 28;
 const DELETE_TARGET_HEIGHT = 76;
 const DELETE_BAR_HEIGHT = 30;
 const AUTO_SCROLL_EDGE = 46;
@@ -40,78 +47,142 @@ const DROP_HIT_TEST_INTERVAL = 40;
 const DRAG_POINT_EPSILON = 1.25;
 const LONG_TASK_TEXT_LENGTH = 34;
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
-const INK = '#161616';
-const APP_SURFACE = '#F7F7F4';
-const PANEL_SURFACE = '#FAFAF8';
-const HAIRLINE_DARK = 'rgba(22,22,22,0.12)';
-const DROP_GUIDE = '#F4C430';
-const DANGER = '#D94A3A';
-const DANGER_SOFT = 'rgba(217,74,58,0.16)';
-const HISTORY_OPEN_TRIGGER = 92;
-const HISTORY_CLOSE_TRIGGER = 92;
+const INK = "#161616";
+const APP_SURFACE = "#F7F7F4";
+const PANEL_SURFACE = "#FAFAF8";
+const HAIRLINE_DARK = "rgba(22,22,22,0.12)";
+const DROP_GUIDE = "#F4C430";
+const DANGER = "#D94A3A";
+// splash-icon.png: 1024x1024 canvas, grid is center 512x512 (50%), corner radius 115px within grid
+// So visual grid = Math.min(W,H) * 0.5, corner radius = 115/512 of grid size
+const SPLASH_GRID_RATIO = 0.5;
+const SPLASH_RADIUS_RATIO = 115 / 512;
+const DANGER_SOFT = "rgba(217,74,58,0.16)";
 
 const TYPE = {
-  screenTitle: { fontFamily: 'Nunito_900Black', fontSize: 26, lineHeight: 32 },
-  screenSubtitle: { fontFamily: 'Nunito_700Bold', fontSize: 11.5, lineHeight: 16 },
-  sectionLabel: { fontFamily: 'Nunito_900Black', fontSize: 10, lineHeight: 13, letterSpacing: 0, textTransform: 'uppercase' },
-  rowTitle: { fontFamily: 'Nunito_900Black', fontSize: 15, lineHeight: 19 },
-  rowMeta: { fontFamily: 'Nunito_700Bold', fontSize: 10.5, lineHeight: 14 },
-  tileTitle: { fontFamily: 'Nunito_800ExtraBold', fontSize: 14, lineHeight: 17 },
-  tileMeta: { fontFamily: 'Nunito_700Bold', fontSize: 9.5, lineHeight: 12.5 },
-  task: { fontFamily: 'Nunito_600SemiBold', fontSize: 11.5, lineHeight: 16 },
-  dragLabel: { fontFamily: 'Nunito_800ExtraBold', fontSize: 12, lineHeight: 16 },
-  button: { fontFamily: 'Nunito_900Black', fontSize: 12, lineHeight: 16 },
-  smallButton: { fontFamily: 'Nunito_900Black', fontSize: 11, lineHeight: 15 },
-  composerTitle: { fontFamily: 'Nunito_800ExtraBold', fontSize: 15, lineHeight: 19 },
-  composerMeta: { fontFamily: 'Nunito_700Bold', fontSize: 10.5, lineHeight: 14 },
-  input: { fontFamily: 'Nunito_600SemiBold', fontSize: 14, lineHeight: 18 },
+  screenTitle: { fontFamily: "Nunito_900Black", fontSize: 26, lineHeight: 32 },
+  screenSubtitle: {
+    fontFamily: "Nunito_700Bold",
+    fontSize: 11.5,
+    lineHeight: 16,
+  },
+  sectionLabel: {
+    fontFamily: "Nunito_900Black",
+    fontSize: 10,
+    lineHeight: 13,
+    letterSpacing: 0,
+    textTransform: "uppercase",
+  },
+  rowTitle: { fontFamily: "Nunito_900Black", fontSize: 15, lineHeight: 19 },
+  rowMeta: { fontFamily: "Nunito_700Bold", fontSize: 10.5, lineHeight: 14 },
+  tileTitle: {
+    fontFamily: "Nunito_800ExtraBold",
+    fontSize: 14,
+    lineHeight: 17,
+  },
+  tileMeta: { fontFamily: "Nunito_700Bold", fontSize: 9.5, lineHeight: 12.5 },
+  task: { fontFamily: "Nunito_600SemiBold", fontSize: 11.5, lineHeight: 16 },
+  dragLabel: {
+    fontFamily: "Nunito_800ExtraBold",
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  button: { fontFamily: "Nunito_900Black", fontSize: 12, lineHeight: 16 },
+  smallButton: { fontFamily: "Nunito_900Black", fontSize: 11, lineHeight: 15 },
+  composerTitle: {
+    fontFamily: "Nunito_800ExtraBold",
+    fontSize: 15,
+    lineHeight: 19,
+  },
+  composerMeta: {
+    fontFamily: "Nunito_700Bold",
+    fontSize: 10.5,
+    lineHeight: 14,
+  },
+  input: { fontFamily: "Nunito_600SemiBold", fontSize: 14, lineHeight: 18 },
 };
 
 const MOTION = {
-  enter: 150,
-  exit: 105,
-  quick: 80,
-  out: Easing.out(Easing.cubic),
-  in: Easing.in(Easing.cubic),
+  exit: 180,
+  quick: 100,
+  // Smooth decelerate (starts fast, trails naturally) — for timing-based exits
+  out: Easing.bezier(0.25, 0.1, 0.25, 1),
+  // Accelerate (clean exit) — for timing-based closes
+  in: Easing.bezier(0.42, 0, 1, 1),
+  // Spring configs for enters — physical deceleration, no bounce
+  spring: { tension: 180, friction: 26, overshootClamping: true, useNativeDriver: true },
+  springPanel: { tension: 80, friction: 14, overshootClamping: true, useNativeDriver: true },
+  springFast: { tension: 260, friction: 28, overshootClamping: true, useNativeDriver: true },
 };
 
 const QUADS = [
-  { id: 'q1', title: 'Do Now', desc: 'Urgent - Important' },
-  { id: 'q2', title: 'Schedule', desc: 'Important - Not urgent' },
-  { id: 'q3', title: 'Delegate', desc: 'Urgent - Not important' },
-  { id: 'q4', title: 'Eliminate', desc: 'Not urgent - Not important' },
+  { id: "q1", title: "Do Now", desc: "Urgent - Important" },
+  { id: "q2", title: "Schedule", desc: "Important - Not urgent" },
+  { id: "q3", title: "Delegate", desc: "Urgent - Not important" },
+  { id: "q4", title: "Eliminate", desc: "Not urgent - Not important" },
 ];
 
 const INIT = {
-  q1: [{ id: 1, text: 'Reply to the urgent email', done: false }],
+  q1: [{ id: 1, text: "Reply to the urgent email", done: false }],
   q2: [
-    { id: 2, text: 'Read the strategy book', done: false },
-    { id: 3, text: 'Write the quarterly plan', done: false },
+    { id: 2, text: "Read the strategy book", done: false },
+    { id: 3, text: "Write the quarterly plan", done: false },
   ],
-  q3: [{ id: 4, text: 'Team sync call', done: false }],
-  q4: [{ id: 5, text: 'Check social feeds', done: false }],
+  q3: [{ id: 4, text: "Team sync call", done: false }],
+  q4: [{ id: 5, text: "Check social feeds", done: false }],
 };
 
 const COLORS = {
-  q1: { bg: '#161616', fg: '#FFFFFF', muted: 'rgba(255,255,255,0.50)', check: '#FFFFFF', done: 'rgba(255,255,255,0.36)' },
-  q2: { bg: '#FFE68A', fg: INK, muted: 'rgba(22,22,22,0.50)', check: INK, done: 'rgba(22,22,22,0.34)' },
-  q3: { bg: '#F2F2F0', fg: INK, muted: 'rgba(22,22,22,0.46)', check: INK, done: 'rgba(22,22,22,0.32)' },
-  q4: { bg: '#F7DAD5', fg: INK, muted: 'rgba(22,22,22,0.46)', check: INK, done: 'rgba(22,22,22,0.32)' },
+  q1: {
+    bg: "#161616",
+    fg: "#FFFFFF",
+    muted: "rgba(255,255,255,0.50)",
+    check: "#FFFFFF",
+    done: "rgba(255,255,255,0.36)",
+  },
+  q2: {
+    bg: "#FFE68A",
+    fg: INK,
+    muted: "rgba(22,22,22,0.50)",
+    check: INK,
+    done: "rgba(22,22,22,0.34)",
+  },
+  q3: {
+    bg: "#F2F2F0",
+    fg: INK,
+    muted: "rgba(22,22,22,0.46)",
+    check: INK,
+    done: "rgba(22,22,22,0.32)",
+  },
+  q4: {
+    bg: "#F7DAD5",
+    fg: INK,
+    muted: "rgba(22,22,22,0.46)",
+    check: INK,
+    done: "rgba(22,22,22,0.32)",
+  },
 };
 
 const TASK_DIVIDER_COLORS = {
-  q1: 'rgba(255,255,255,0.14)',
-  q2: 'rgba(22,22,22,0.12)',
-  q3: 'rgba(22,22,22,0.10)',
-  q4: 'rgba(22,22,22,0.10)',
+  q1: "rgba(255,255,255,0.14)",
+  q2: "rgba(22,22,22,0.12)",
+  q3: "rgba(22,22,22,0.10)",
+  q4: "rgba(22,22,22,0.10)",
 };
 
 function getNextId(tasks) {
-  return Math.max(0, ...Object.values(tasks).flat().map(task => Number(task.id) || 0)) + 1;
+  return (
+    Math.max(
+      0,
+      ...Object.values(tasks)
+        .flat()
+        .map((task) => Number(task.id) || 0),
+    ) + 1
+  );
 }
 
 function isValidTasks(value) {
-  return value && QUADS.every(q => Array.isArray(value[q.id]));
+  return value && QUADS.every((q) => Array.isArray(value[q.id]));
 }
 
 function createEmptyTasks() {
@@ -123,9 +194,99 @@ function createEmptyTasks() {
 
 function getLocalDayKey(date = new Date()) {
   const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function upsertHistoryEntry(history, dayKey, tasks) {
+  const entry = { dayKey, total: getTaskCount(tasks), tasks };
+  const idx = history.findIndex((e) => e.dayKey === dayKey);
+  if (idx === -1) {
+    return [...history, entry].sort((a, b) => b.dayKey.localeCompare(a.dayKey));
+  }
+  const next = [...history];
+  next[idx] = entry;
+  return next;
+}
+
+function dayKeyToDate(dayKey) {
+  const [year, month, day] = dayKey.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function formatHistoryDate(dayKey) {
+  const today = getLocalDayKey();
+  const dy = new Date(); dy.setDate(dy.getDate() - 1);
+  const tm = new Date(); tm.setDate(tm.getDate() + 1);
+  if (dayKey === today) return "Today";
+  if (dayKey === getLocalDayKey(dy)) return "Yesterday";
+  if (dayKey === getLocalDayKey(tm)) return "Tomorrow";
+  const date = dayKeyToDate(dayKey);
+  const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${DOW[date.getDay()]} ${date.getDate()} ${MON[date.getMonth()]}`;
+}
+
+// Returns { label, dateStr } for the date pill.
+// label = "Today" / "Yesterday" / "Tomorrow" / null
+// dateStr = "Tue 27 May"
+function formatPillParts(dayKey) {
+  const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const today = getLocalDayKey();
+  const dy = new Date(); dy.setDate(dy.getDate() - 1);
+  const tm = new Date(); tm.setDate(tm.getDate() + 1);
+  const date = dayKey ? dayKeyToDate(dayKey) : new Date();
+  const dateStr = `${DOW[date.getDay()]} ${date.getDate()} ${MON[date.getMonth()]}`;
+  if (!dayKey || dayKey === today) return { label: "Today", dateStr };
+  if (dayKey === getLocalDayKey(dy)) return { label: "Yesterday", dateStr };
+  if (dayKey === getLocalDayKey(tm)) return { label: "Tomorrow", dateStr };
+  return { label: null, dateStr };
+}
+
+function formatHistoryDateLong(dayKey) {
+  const today = getLocalDayKey();
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  const yesterday = getLocalDayKey(d);
+  if (dayKey === today) return "Today";
+  if (dayKey === yesterday) return "Yesterday";
+  const [year, month, day] = dayKey.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  const DOW = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const yearSuffix = date.getFullYear() !== new Date().getFullYear() ? `, ${year}` : "";
+  return `${DOW[date.getDay()]}, ${MON[month - 1]} ${day}${yearSuffix}`;
+}
+
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+function formatDatePill(date = new Date()) {
+  const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${DOW[date.getDay()]} ${date.getDate()} ${MON[date.getMonth()]}`;
+}
+
+function getCalendarGrid(year, month) {
+  const firstDow = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const grid = Array(firstDow).fill(null);
+  for (let d = 1; d <= daysInMonth; d++) grid.push(d);
+  while (grid.length % 7 !== 0) grid.push(null);
+  return grid;
+}
+
+function formatDeadlineShort(dayKey) {
+  const today = getLocalDayKey();
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  if (dayKey === today) return "Today";
+  if (dayKey === getLocalDayKey(d)) return "Tomorrow";
+  return formatHistoryDate(dayKey);
 }
 
 function getTaskCount(tasks) {
@@ -135,7 +296,10 @@ function getTaskCount(tasks) {
 
 function getDoneCount(tasks) {
   if (!isValidTasks(tasks)) return 0;
-  return QUADS.reduce((total, q) => total + tasks[q.id].filter(task => task.done).length, 0);
+  return QUADS.reduce(
+    (total, q) => total + tasks[q.id].filter((task) => task.done).length,
+    0,
+  );
 }
 
 function hasAnyTasks(tasks) {
@@ -157,110 +321,18 @@ function normalizeTasks(tasks) {
   return orderAllTasksByDone(normalized);
 }
 
-function createHistoryEntry(dayKey, tasks, archivedAt = new Date().toISOString()) {
-  const snapshot = normalizeTasks(tasks);
-  return {
-    id: dayKey,
-    dayKey,
-    archivedAt,
-    total: getTaskCount(snapshot),
-    done: getDoneCount(snapshot),
-    counts: getQuadCounts(snapshot),
-    tasks: snapshot,
-  };
-}
-
-function normalizeHistoryEntry(entry) {
-  if (!entry?.dayKey || !isValidTasks(entry.tasks)) return null;
-  return createHistoryEntry(entry.dayKey, entry.tasks, entry.archivedAt || new Date().toISOString());
-}
-
-function normalizeHistory(value) {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map(normalizeHistoryEntry)
-    .filter(Boolean)
-    .sort((a, b) => b.dayKey.localeCompare(a.dayKey))
-    .slice(0, MAX_HISTORY_DAYS);
-}
-
-function upsertHistoryEntry(history, entry) {
-  return [entry, ...history.filter(item => item.dayKey !== entry.dayKey)]
-    .sort((a, b) => b.dayKey.localeCompare(a.dayKey))
-    .slice(0, MAX_HISTORY_DAYS);
-}
-
-function parseDayKey(dayKey) {
-  const [year, month, day] = String(dayKey).split('-').map(Number);
-  if (!year || !month || !day) return null;
-  return new Date(year, month - 1, day);
-}
-
-function formatHistoryLongDate(dayKey) {
-  const date = parseDayKey(dayKey);
-  if (!date) return dayKey;
-  return date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-}
-
-function getMonthKey(date = new Date()) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  return `${year}-${month}`;
-}
-
-function getMonthKeyForDay(dayKey) {
-  return String(dayKey).slice(0, 7);
-}
-
-function parseMonthKey(monthKey) {
-  const [year, month] = String(monthKey).split('-').map(Number);
-  if (!year || !month) return new Date();
-  return new Date(year, month - 1, 1);
-}
-
-function addMonthsToKey(monthKey, offset) {
-  const date = parseMonthKey(monthKey);
-  date.setMonth(date.getMonth() + offset);
-  return getMonthKey(date);
-}
-
-function formatMonthTitle(monthKey) {
-  return parseMonthKey(monthKey).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-}
-
-function getCalendarCells(monthKey) {
-  const firstDay = parseMonthKey(monthKey);
-  const firstWeekday = (firstDay.getDay() + 6) % 7;
-  const start = new Date(firstDay);
-  start.setDate(firstDay.getDate() - firstWeekday);
-
-  return Array.from({ length: 42 }, (_, index) => {
-    const date = new Date(start);
-    date.setDate(start.getDate() + index);
-    const dayKey = getLocalDayKey(date);
-    return {
-      dayKey,
-      day: date.getDate(),
-      inMonth: getMonthKey(date) === monthKey,
-      isToday: dayKey === getLocalDayKey(),
-      isFuture: dayKey > getLocalDayKey(),
-    };
-  });
-}
-
-function getHistoryEntryForDay(history, dayKey, activeDay, tasks) {
-  if (dayKey === activeDay) return createHistoryEntry(dayKey, tasks);
-  return history.find(entry => entry.dayKey === dayKey) || null;
-}
-
 function getVirtualDropSlots(list, qid, currentDragging, layouts = {}) {
   let cursor = 0;
   const slots = [];
 
-  list.forEach(task => {
-    if (currentDragging?.from === qid && currentDragging.task.id === task.id) return;
+  list.forEach((task) => {
+    if (currentDragging?.from === qid && currentDragging.task.id === task.id)
+      return;
     const layout = layouts[task.id];
-    const height = Math.max(1, Number.isFinite(layout?.height) ? layout.height : 42);
+    const height = Math.max(
+      1,
+      Number.isFinite(layout?.height) ? layout.height : 42,
+    );
     slots.push({ task, top: cursor, height });
     cursor += height;
   });
@@ -272,7 +344,7 @@ function constrainDropIndexByDone(slots, index, draggedTask) {
   const clampedIndex = Math.max(0, Math.min(slots.length, index));
   if (!draggedTask) return clampedIndex;
 
-  const firstDoneIndex = slots.findIndex(slot => slot.task.done);
+  const firstDoneIndex = slots.findIndex((slot) => slot.task.done);
   const doneStart = firstDoneIndex === -1 ? slots.length : firstDoneIndex;
 
   return draggedTask.done
@@ -284,23 +356,26 @@ function getMoveIndexFromMarker(list, qid, markerIndex, currentDragging) {
   let index = markerIndex;
 
   if (currentDragging?.from === qid) {
-    const fromIndex = list.findIndex(task => task.id === currentDragging.task.id);
+    const fromIndex = list.findIndex(
+      (task) => task.id === currentDragging.task.id,
+    );
     if (fromIndex !== -1 && fromIndex < markerIndex) index -= 1;
   }
 
-  const targetLength = currentDragging?.from === qid ? Math.max(0, list.length - 1) : list.length;
+  const targetLength =
+    currentDragging?.from === qid ? Math.max(0, list.length - 1) : list.length;
   return Math.max(0, Math.min(targetLength, index));
 }
 
 function clamp01(value) {
-  'worklet';
+  "worklet";
   return Math.max(0, Math.min(1, value));
 }
 
 function orderTasksByDone(list) {
   const active = [];
   const done = [];
-  list.forEach(task => {
+  list.forEach((task) => {
     if (task.done) done.push(task);
     else active.push(task);
   });
@@ -319,22 +394,23 @@ function getDropGuideColor() {
 }
 
 function getTaskDividerColor(quadId) {
-  return TASK_DIVIDER_COLORS[quadId] || 'rgba(128,128,128,0.16)';
+  return TASK_DIVIDER_COLORS[quadId] || "rgba(128,128,128,0.16)";
 }
 
 function CheckButton({ done, quadId, taskId, onPress }) {
   const color = COLORS[quadId];
-  const idleBorder = quadId === 'q1' ? 'rgba(255,255,255,0.42)' : 'rgba(22,22,22,0.30)';
+  const idleBorder =
+    quadId === "q1" ? "rgba(255,255,255,0.42)" : "rgba(22,22,22,0.30)";
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityState={{ selected: done, disabled: false }}
-      accessibilityLabel={done ? 'Mark incomplete' : 'Mark complete'}
+      accessibilityLabel={done ? "Mark incomplete" : "Mark complete"}
       disabled={false}
       hitSlop={0}
       onPress={onPress}
       testID={`task-${taskId}-check`}
-      style={styles.checkHit}
+      style={({ pressed }) => [styles.checkHit, pressed && styles.pressed]}
     >
       <View
         style={[
@@ -347,341 +423,664 @@ function CheckButton({ done, quadId, taskId, onPress }) {
   );
 }
 
-const MiniTask = memo(function MiniTask({ task, quadId, isDragging, isLast, onEdit, onToggle, onBeginDrag, onDragMove, onEndDrag, onLayout }) {
-  const longPressTimer = useRef(null);
-  const didLongPress = useRef(false);
-  const moved = useRef(false);
-  const pressBlocked = useRef(false);
-  const start = useRef({ x: 0, y: 0 });
-  const isLongTask = task.text.length > LONG_TASK_TEXT_LENGTH;
-  const isDoneVisual = task.done;
-  const taskTextColor = isDoneVisual ? COLORS[quadId].done : COLORS[quadId].fg;
-  const dividerColor = getTaskDividerColor(quadId);
+const MiniTask = memo(
+  function MiniTask({
+    task,
+    quadId,
+    isDragging,
+    isLast,
+    onEdit,
+    onToggle,
+    onBeginDrag,
+    onDragMove,
+    onEndDrag,
+    onLayout,
+  }) {
+    const longPressTimer = useRef(null);
+    const didLongPress = useRef(false);
+    const moved = useRef(false);
+    const pressBlocked = useRef(false);
+    const start = useRef({ x: 0, y: 0 });
+    const isLongTask = task.text.length > LONG_TASK_TEXT_LENGTH;
+    const isDoneVisual = task.done;
+    const taskTextColor = isDoneVisual
+      ? COLORS[quadId].done
+      : COLORS[quadId].fg;
+    const dividerColor = getTaskDividerColor(quadId);
 
-  useEffect(() => () => clearTimeout(longPressTimer.current), []);
+    useEffect(() => () => clearTimeout(longPressTimer.current), []);
 
-  const beginTouch = event => {
-    const { pageX, pageY } = event.nativeEvent;
-    didLongPress.current = false;
-    moved.current = false;
-    pressBlocked.current = false;
-    start.current = { x: pageX, y: pageY };
-    clearTimeout(longPressTimer.current);
-    longPressTimer.current = setTimeout(() => {
-      didLongPress.current = true;
-      pressBlocked.current = true;
-      onBeginDrag(quadId, task, pageX, pageY);
-    }, 360);
-  };
-
-  const moveTouch = event => {
-    const { pageX, pageY } = event.nativeEvent;
-    if (!didLongPress.current && (Math.abs(pageX - start.current.x) > 9 || Math.abs(pageY - start.current.y) > 9)) {
-      moved.current = true;
-      pressBlocked.current = true;
-      clearTimeout(longPressTimer.current);
-      return;
-    }
-    if (didLongPress.current) onDragMove(pageX, pageY);
-  };
-
-  const endTouch = cancelled => {
-    clearTimeout(longPressTimer.current);
-    if (didLongPress.current) {
+    const beginTouch = (event) => {
+      const { pageX, pageY } = event.nativeEvent;
       didLongPress.current = false;
-      onEndDrag(cancelled);
-      return;
-    }
-    if (cancelled || moved.current) pressBlocked.current = true;
-  };
+      moved.current = false;
+      pressBlocked.current = false;
+      start.current = { x: pageX, y: pageY };
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = setTimeout(() => {
+        didLongPress.current = true;
+        pressBlocked.current = true;
+        onBeginDrag(quadId, task, pageX, pageY);
+      }, 360);
+    };
 
-  const pressTask = () => {
-    if (pressBlocked.current) return;
-    onEdit(quadId, task);
-  };
+    const moveTouch = (event) => {
+      const { pageX, pageY } = event.nativeEvent;
+      if (
+        !didLongPress.current &&
+        (Math.abs(pageX - start.current.x) > 9 ||
+          Math.abs(pageY - start.current.y) > 9)
+      ) {
+        moved.current = true;
+        pressBlocked.current = true;
+        clearTimeout(longPressTimer.current);
+        return;
+      }
+      if (didLongPress.current) onDragMove(pageX, pageY);
+    };
 
-  return (
-    <View
-      testID={`task-${task.id}`}
-      onLayout={onLayout}
-      style={[
-        styles.miniTask,
-        !isLast && [styles.miniTaskDivider, { borderBottomColor: dividerColor }],
-        isLongTask && styles.miniTaskRoomy,
-        isDragging && styles.dragSource,
-      ]}
-    >
-      <CheckButton done={task.done} quadId={quadId} taskId={task.id} onPress={onToggle} />
-      <Pressable
-        accessible
-        accessibilityLabel={`Edit task: ${task.text}`}
-        accessibilityRole="button"
-        testID={`task-${task.id}-edit`}
-        onPress={pressTask}
-        onTouchCancel={() => endTouch(true)}
-        onTouchEnd={() => endTouch(false)}
-        onTouchMove={moveTouch}
-        onTouchStart={beginTouch}
-        style={[styles.miniDragArea, isLongTask && styles.miniDragAreaRoomy]}
-      >
-        <Text style={[styles.miniText, { color: taskTextColor }, isDoneVisual && styles.doneText]}>
-          {task.text}
-        </Text>
-      </Pressable>
-    </View>
-  );
-}, (prev, next) => (
-  prev.task === next.task &&
-  prev.quadId === next.quadId &&
-  prev.isDragging === next.isDragging &&
-  prev.isLast === next.isLast
-));
+    const endTouch = (cancelled) => {
+      clearTimeout(longPressTimer.current);
+      if (didLongPress.current) {
+        didLongPress.current = false;
+        onEndDrag(cancelled);
+        return;
+      }
+      if (cancelled || moved.current) pressBlocked.current = true;
+    };
 
-const keyTask = task => String(task.id);
+    const pressTask = () => {
+      if (pressBlocked.current) return;
+      onEdit(quadId, task);
+    };
 
-const QuadrantTile = memo(function QuadrantTile({
-  q,
-  color,
-  tasks,
-  topInset,
-  dropMarkerTop,
-  draggingTaskId,
-  draggingActive,
-  setQuadRef,
-  setTaskAreaRef,
-  setTaskListRef,
-  onMeasure,
-  onTaskScroll,
-  onTaskContentSize,
-  onTaskLayout,
-  onOpenComposer,
-  onToggleTask,
-  onBeginDrag,
-  onDragMove,
-  onEndDrag,
-}) {
-  const isTopTile = q.id === 'q1' || q.id === 'q2';
-  const isDropActive = dropMarkerTop !== null;
-  const dropGuideColor = getDropGuideColor(q.id);
-  const dropOverlayAnim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    dropOverlayAnim.stopAnimation();
-    dropOverlayAnim.setValue(isDropActive ? 1 : 0);
-  }, [dropOverlayAnim, isDropActive]);
-
-  const renderTask = useCallback(({ item, index }) => (
-    <MiniTask
-      task={item}
-      quadId={q.id}
-      isDragging={draggingTaskId === item.id}
-      isLast={index === tasks.length - 1}
-      onEdit={onOpenComposer}
-      onToggle={() => onToggleTask(q.id, item.id)}
-      onBeginDrag={onBeginDrag}
-      onDragMove={onDragMove}
-      onEndDrag={onEndDrag}
-      onLayout={event => onTaskLayout(q.id, item.id, event)}
-    />
-  ), [draggingTaskId, onBeginDrag, onDragMove, onEndDrag, onOpenComposer, onTaskLayout, onToggleTask, q.id, tasks.length]);
-
-  const renderFooter = useCallback(() => (
-    <Pressable
-      accessible
-      accessibilityLabel={`Add task to ${q.title}`}
-      accessibilityRole="button"
-      testID={`quadrant-${q.id}-empty-add-zone`}
-      onPress={() => onOpenComposer(q.id)}
-      style={styles.emptyAddZone}
-    />
-  ), [onOpenComposer, q.id, q.title]);
-
-  return (
-    <View
-      testID={`quadrant-${q.id}`}
-      ref={setQuadRef}
-      collapsable={false}
-      onLayout={onMeasure}
-      style={[
-        styles.tile,
-        { backgroundColor: color.bg },
-      ]}
-    >
-      <View style={[styles.tileHead, isTopTile && { paddingTop: 12 + topInset }]}>
-        <View style={styles.tileHeadTop}>
-          <Text style={[styles.tileTitle, { color: color.fg }]} numberOfLines={2}>{q.title}</Text>
-        </View>
-        <Text style={[styles.tileDesc, { color: color.muted }]}>{q.desc}</Text>
-      </View>
+    return (
       <View
-        ref={setTaskAreaRef}
-        collapsable={false}
-        onLayout={onMeasure}
-        style={styles.tileTasks}
-      >
-        <FlatList
-          ref={setTaskListRef}
-          data={tasks}
-          keyExtractor={keyTask}
-          renderItem={renderTask}
-          ListFooterComponent={renderFooter}
-          ListFooterComponentStyle={styles.emptyAddFooter}
-          style={styles.tileList}
-          contentContainerStyle={styles.tileTasksContent}
-          onScroll={event => onTaskScroll(q.id, event.nativeEvent.contentOffset.y)}
-          onContentSizeChange={(_, height) => onTaskContentSize(q.id, height)}
-          scrollEventThrottle={16}
-          scrollEnabled={!draggingActive}
-          showsVerticalScrollIndicator={false}
-          initialNumToRender={INITIAL_RENDER_TASKS}
-          maxToRenderPerBatch={TASK_RENDER_BATCH}
-          updateCellsBatchingPeriod={32}
-          windowSize={LIST_WINDOW_SIZE}
-          removeClippedSubviews={Platform.OS === 'android'}
-          keyboardShouldPersistTaps="handled"
-          extraData={draggingTaskId || ''}
-        />
-        {dropMarkerTop !== null && (
-          <View pointerEvents="none" style={[styles.dropInsertMarkerFloating, { top: Math.max(0, dropMarkerTop - 5) }]}>
-            <View style={[styles.dropInsertLine, { backgroundColor: dropGuideColor }]} />
-          </View>
-        )}
-      </View>
-      <Animated.View
-        pointerEvents="none"
+        testID={`task-${task.id}`}
+        onLayout={onLayout}
         style={[
-          styles.dropOverlay,
-          isTopTile && { top: topInset },
-          { opacity: dropOverlayAnim },
+          styles.miniTask,
+          !isLast && [
+            styles.miniTaskDivider,
+            { borderBottomColor: dividerColor },
+          ],
+          isLongTask && styles.miniTaskRoomy,
+          isDragging && styles.dragSource,
         ]}
       >
-        <View style={[styles.dropOverlayLine, styles.dropOverlayLineTop, { backgroundColor: dropGuideColor, borderColor: dropGuideColor }]} />
-        <View style={[styles.dropOverlayLine, styles.dropOverlayLineRight, { backgroundColor: dropGuideColor, borderColor: dropGuideColor }]} />
-        <View style={[styles.dropOverlayLine, styles.dropOverlayLineBottom, { backgroundColor: dropGuideColor, borderColor: dropGuideColor }]} />
-        <View style={[styles.dropOverlayLine, styles.dropOverlayLineLeft, { backgroundColor: dropGuideColor, borderColor: dropGuideColor }]} />
-      </Animated.View>
-    </View>
-  );
-}, (prev, next) => (
-  prev.tasks === next.tasks &&
-  prev.topInset === next.topInset &&
-  prev.dropMarkerTop === next.dropMarkerTop &&
-  prev.draggingTaskId === next.draggingTaskId &&
-  prev.draggingActive === next.draggingActive &&
-  prev.q.id === next.q.id
-));
+        <CheckButton
+          done={task.done}
+          quadId={quadId}
+          taskId={task.id}
+          onPress={onToggle}
+        />
+        <Pressable
+          accessible
+          accessibilityLabel={`Edit task: ${task.text}`}
+          accessibilityRole="button"
+          testID={`task-${task.id}-edit`}
+          onPress={pressTask}
+          onTouchCancel={() => endTouch(true)}
+          onTouchEnd={() => endTouch(false)}
+          onTouchMove={moveTouch}
+          onTouchStart={beginTouch}
+          style={[styles.miniDragArea, isLongTask && styles.miniDragAreaRoomy]}
+        >
+          <View style={styles.miniTaskNameRow}>
+            <Text
+              style={[
+                styles.miniText,
+                { color: taskTextColor },
+                isDoneVisual && styles.doneText,
+              ]}
+            >
+              {task.text}
+            </Text>
+            {task.repeat && !isDoneVisual && (
+              <Ionicons
+                name="repeat"
+                size={9}
+                color={COLORS[quadId].muted}
+              />
+            )}
+          </View>
+          {task.deadline && !isDoneVisual && (
+            <Text
+              style={[
+                styles.deadlineLabel,
+                { color: task.deadline < getLocalDayKey() ? DANGER : COLORS[quadId].muted },
+              ]}
+            >
+              {formatDeadlineShort(task.deadline)}
+            </Text>
+          )}
+        </Pressable>
+      </View>
+    );
+  },
+  (prev, next) =>
+    prev.task === next.task &&
+    prev.quadId === next.quadId &&
+    prev.isDragging === next.isDragging &&
+    prev.isLast === next.isLast,
+);
 
-function HistoryScreen({
-  history,
-  tasks,
-  activeDay,
-  onSelectDay,
-}) {
-  const [visibleMonth, setVisibleMonth] = useState(getMonthKeyForDay(activeDay));
-  const cells = useMemo(() => getCalendarCells(visibleMonth), [visibleMonth]);
-  const todayMonth = getMonthKey();
-  const activeEntry = getHistoryEntryForDay(history, activeDay, activeDay, tasks);
-  const canGoNext = visibleMonth < todayMonth;
+const keyTask = (task) => String(task.id);
 
-  return (
-    <SafeAreaView testID="history-screen" style={styles.historyScreen} edges={['top', 'right', 'bottom', 'left']}>
-      <View style={styles.historyHeader}>
-        <View style={styles.historyHeaderText}>
-          <Text style={styles.historyTitle}>History</Text>
-          <Text style={styles.historySubtitle}>
-            {activeEntry.total > 0 ? `${formatHistoryLongDate(activeDay)} - ${activeEntry.total} tasks` : formatHistoryLongDate(activeDay)}
+const QuadrantTile = memo(
+  function QuadrantTile({
+    q,
+    color,
+    tasks,
+    topInset,
+    dropMarkerTop,
+    draggingTaskId,
+    draggingActive,
+    setQuadRef,
+    setTaskAreaRef,
+    setTaskListRef,
+    onMeasure,
+    onTaskScroll,
+    onTaskContentSize,
+    onTaskLayout,
+    onOpenComposer,
+    onToggleTask,
+    onBeginDrag,
+    onDragMove,
+    onEndDrag,
+  }) {
+    const isTopTile = q.id === "q1" || q.id === "q2";
+    const isDropActive = dropMarkerTop !== null;
+    const dropGuideColor = getDropGuideColor(q.id);
+    const dropOverlayAnim = useRef(new Animated.Value(0)).current;
+
+    useEffect(() => {
+      dropOverlayAnim.stopAnimation();
+      dropOverlayAnim.setValue(isDropActive ? 1 : 0);
+    }, [dropOverlayAnim, isDropActive]);
+
+    const renderTask = useCallback(
+      ({ item, index }) => (
+        <MiniTask
+          task={item}
+          quadId={q.id}
+          isDragging={draggingTaskId === item.id}
+          isLast={index === tasks.length - 1}
+          onEdit={onOpenComposer}
+          onToggle={() => onToggleTask(q.id, item.id)}
+          onBeginDrag={onBeginDrag}
+          onDragMove={onDragMove}
+          onEndDrag={onEndDrag}
+          onLayout={(event) => onTaskLayout(q.id, item.id, event)}
+        />
+      ),
+      [
+        draggingTaskId,
+        onBeginDrag,
+        onDragMove,
+        onEndDrag,
+        onOpenComposer,
+        onTaskLayout,
+        onToggleTask,
+        q.id,
+        tasks.length,
+      ],
+    );
+
+    const renderFooter = useCallback(
+      () => (
+        <Pressable
+          accessible
+          accessibilityLabel={`Add task to ${q.title}`}
+          accessibilityRole="button"
+          testID={`quadrant-${q.id}-empty-add-zone`}
+          onPress={() => onOpenComposer(q.id)}
+          style={({ pressed }) => [styles.emptyAddZone, pressed && { opacity: 0.6 }]}
+        />
+      ),
+      [onOpenComposer, q.id, q.title],
+    );
+
+    return (
+      <View
+        testID={`quadrant-${q.id}`}
+        ref={setQuadRef}
+        collapsable={false}
+        onLayout={onMeasure}
+        style={[styles.tile, { backgroundColor: color.bg }]}
+      >
+        <View
+          style={[styles.tileHead, isTopTile && { paddingTop: 28 + topInset }]}
+        >
+          <View style={styles.tileHeadTop}>
+            <Text
+              style={[styles.tileTitle, { color: color.fg }]}
+              numberOfLines={2}
+            >
+              {q.title}
+            </Text>
+          </View>
+          <Text style={[styles.tileDesc, { color: color.muted }]}>
+            {q.desc}
           </Text>
         </View>
+        <View
+          ref={setTaskAreaRef}
+          collapsable={false}
+          onLayout={onMeasure}
+          style={styles.tileTasks}
+        >
+          <FlatList
+            ref={setTaskListRef}
+            data={tasks}
+            keyExtractor={keyTask}
+            renderItem={renderTask}
+            ListFooterComponent={renderFooter}
+            ListFooterComponentStyle={styles.emptyAddFooter}
+            style={styles.tileList}
+            contentContainerStyle={styles.tileTasksContent}
+            onScroll={(event) =>
+              onTaskScroll(q.id, event.nativeEvent.contentOffset.y)
+            }
+            onContentSizeChange={(_, height) => onTaskContentSize(q.id, height)}
+            scrollEventThrottle={16}
+            scrollEnabled={!draggingActive}
+            showsVerticalScrollIndicator={false}
+            initialNumToRender={INITIAL_RENDER_TASKS}
+            maxToRenderPerBatch={TASK_RENDER_BATCH}
+            updateCellsBatchingPeriod={32}
+            windowSize={LIST_WINDOW_SIZE}
+            removeClippedSubviews={Platform.OS === "android"}
+            keyboardShouldPersistTaps="handled"
+            extraData={draggingTaskId || ""}
+          />
+          {dropMarkerTop !== null && (
+            <View
+              pointerEvents="none"
+              style={[
+                styles.dropInsertMarkerFloating,
+                { top: Math.max(0, dropMarkerTop - 5) },
+              ]}
+            >
+              <View
+                style={[
+                  styles.dropInsertLine,
+                  { backgroundColor: dropGuideColor },
+                ]}
+              />
+            </View>
+          )}
+        </View>
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.dropOverlay,
+            isTopTile && { top: topInset },
+            { opacity: dropOverlayAnim },
+          ]}
+        >
+          <View
+            style={[
+              styles.dropOverlayLine,
+              styles.dropOverlayLineTop,
+              { backgroundColor: dropGuideColor, borderColor: dropGuideColor },
+            ]}
+          />
+          <View
+            style={[
+              styles.dropOverlayLine,
+              styles.dropOverlayLineRight,
+              { backgroundColor: dropGuideColor, borderColor: dropGuideColor },
+            ]}
+          />
+          <View
+            style={[
+              styles.dropOverlayLine,
+              styles.dropOverlayLineBottom,
+              { backgroundColor: dropGuideColor, borderColor: dropGuideColor },
+            ]}
+          />
+          <View
+            style={[
+              styles.dropOverlayLine,
+              styles.dropOverlayLineLeft,
+              { backgroundColor: dropGuideColor, borderColor: dropGuideColor },
+            ]}
+          />
+        </Animated.View>
       </View>
-      <View style={styles.calendarShell}>
-        <View style={styles.calendarMonthBar}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Previous month"
-            testID="calendar-prev-month"
-            onPress={() => setVisibleMonth(prev => addMonthsToKey(prev, -1))}
-            style={({ pressed }) => [styles.calendarMonthButton, pressed && styles.historyPressed]}
-          >
-            <Ionicons name="chevron-back-outline" size={22} color={INK} />
+    );
+  },
+  (prev, next) =>
+    prev.tasks === next.tasks &&
+    prev.topInset === next.topInset &&
+    prev.dropMarkerTop === next.dropMarkerTop &&
+    prev.draggingTaskId === next.draggingTaskId &&
+    prev.draggingActive === next.draggingActive &&
+    prev.q.id === next.q.id,
+);
+
+const ArchiveCalendar = memo(function ArchiveCalendar({
+  historyDayKeys,
+  onSelect,
+  onBack,
+}) {
+  const today = getLocalDayKey();
+  const [ym, setYm] = useState(() => {
+    const d = new Date();
+    return { year: d.getFullYear(), month: d.getMonth() };
+  });
+  const monthFadeAnim = useRef(new Animated.Value(1)).current;
+  const daySet = new Set(historyDayKeys);
+  const grid = getCalendarGrid(ym.year, ym.month);
+
+  const changeMonth = useCallback((updater) => {
+    Animated.timing(monthFadeAnim, {
+      toValue: 0,
+      duration: 70,
+      easing: MOTION.in,
+      useNativeDriver: true,
+    }).start(() => {
+      setYm(updater);
+      Animated.spring(monthFadeAnim, { toValue: 1, ...MOTION.spring }).start();
+    });
+  }, [monthFadeAnim]);
+
+  const prevMonth = useCallback(() =>
+    changeMonth(({ year, month }) => {
+      const d = new Date(year, month - 1);
+      return { year: d.getFullYear(), month: d.getMonth() };
+    }), [changeMonth]);
+
+  const nextMonth = useCallback(() =>
+    changeMonth(({ year, month }) => {
+      const d = new Date(year, month + 1);
+      return { year: d.getFullYear(), month: d.getMonth() };
+    }), [changeMonth]);
+
+  return (
+    <View style={{ flex: 1 }}>
+      <View style={styles.archivePanelHeaderRow}>
+        <Pressable onPress={onBack} style={({ pressed }) => [styles.archiveBackBtn, pressed && styles.pressed]}>
+          <Ionicons name="chevron-back" size={20} color="rgba(255,255,255,0.65)" />
+        </Pressable>
+        <Animated.Text style={[styles.archiveCalMonthLabel, { opacity: monthFadeAnim }]}>
+          {MONTH_NAMES[ym.month]} {ym.year}
+        </Animated.Text>
+        <View style={styles.archiveCalNavGroup}>
+          <Pressable onPress={prevMonth} style={({ pressed }) => [styles.archiveCalNav, pressed && styles.pressed]}>
+            <Ionicons name="chevron-back" size={16} color="rgba(255,255,255,0.55)" />
           </Pressable>
-          <Text style={styles.calendarMonthTitle}>{formatMonthTitle(visibleMonth)}</Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Next month"
-            testID="calendar-next-month"
-            disabled={!canGoNext}
-            onPress={() => setVisibleMonth(prev => addMonthsToKey(prev, 1))}
-            style={({ pressed }) => [styles.calendarMonthButton, !canGoNext && styles.calendarMonthButtonDisabled, pressed && canGoNext && styles.historyPressed]}
-          >
-            <Ionicons name="chevron-forward-outline" size={22} color={INK} />
+          <Pressable onPress={nextMonth} style={({ pressed }) => [styles.archiveCalNav, pressed && styles.pressed]}>
+            <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.55)" />
           </Pressable>
         </View>
-        <View style={styles.calendarWeekRow}>
-          {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((label, index) => (
-            <Text key={`${label}-${index}`} style={styles.calendarWeekLabel}>{label}</Text>
+      </View>
+
+      <Animated.View style={[styles.archiveCalBody, { opacity: monthFadeAnim }]}>
+        <View style={styles.archiveCalDowRow}>
+          {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d) => (
+            <Text key={d} style={styles.archiveCalDow}>{d}</Text>
           ))}
         </View>
-        <View style={styles.calendarGrid}>
-          {cells.map(cell => {
-            const entry = getHistoryEntryForDay(history, cell.dayKey, activeDay, tasks);
-            const hasEntry = !!entry;
-            const hasTasks = (entry?.total || 0) > 0;
-            const isActive = cell.dayKey === activeDay;
-            const selectable = !cell.isFuture && (hasEntry || cell.isToday);
-
+        <View style={styles.archiveCalGrid}>
+          {grid.map((day, idx) => {
+            if (!day) return <View key={`e-${idx}`} style={styles.archiveCalCell} />;
+            const mm = String(ym.month + 1).padStart(2, "0");
+            const dd = String(day).padStart(2, "0");
+            const dayKey = `${ym.year}-${mm}-${dd}`;
+            const isToday = dayKey === today;
+            const hasEntry = daySet.has(dayKey);
             return (
               <Pressable
-                key={cell.dayKey}
-                accessibilityRole="button"
-                accessibilityLabel={`${formatHistoryLongDate(cell.dayKey)}${hasTasks ? `, ${entry.total} tasks` : ''}`}
-                accessibilityState={{ selected: isActive, disabled: !selectable }}
-                testID={`calendar-day-${cell.dayKey}`}
-                disabled={!selectable}
-                onPress={() => onSelectDay(cell.dayKey)}
-                style={({ pressed }) => [
-                  styles.calendarDay,
-                  !cell.inMonth && styles.calendarDayMuted,
-                  isActive && styles.calendarDayActive,
-                  cell.isToday && !isActive && styles.calendarDayToday,
-                  !selectable && styles.calendarDayDisabled,
-                  pressed && selectable && styles.historyPressed,
-                ]}
+                key={dayKey}
+                style={({ pressed }) => [styles.archiveCalCell, pressed && styles.pressed]}
+                onPress={() => onSelect(dayKey)}
               >
-                <Text style={[styles.calendarDayText, isActive && styles.calendarDayTextActive, !cell.inMonth && styles.calendarDayTextMuted]}>
-                  {cell.day}
-                </Text>
-                {hasTasks && <View style={[styles.calendarTaskDot, isActive && styles.calendarTaskDotActive]} />}
+                <View style={[
+                  styles.archiveCalDayInner,
+                  hasEntry && styles.archiveCalDayHasEntry,
+                  isToday && styles.archiveCalDayToday,
+                ]}>
+                  <Text style={[
+                    styles.archiveCalDayText,
+                    hasEntry && styles.archiveCalDayTextHasEntry,
+                    isToday && styles.archiveCalDayTextToday,
+                  ]}>
+                    {day}
+                  </Text>
+                </View>
+                {hasEntry && <View style={styles.archiveCalDot} />}
               </Pressable>
             );
           })}
         </View>
-      </View>
-    </SafeAreaView>
+      </Animated.View>
+    </View>
   );
-}
+});
+
+const DeadlinePicker = memo(function DeadlinePicker({ value, quadId, onChange, onClose, minDate, maxDate }) {
+  const color = COLORS[quadId];
+  const today = getLocalDayKey();
+  const effectiveMin = minDate === undefined ? today : minDate;
+  const [ym, setYm] = useState(() => {
+    const base = value ? new Date(value + "T00:00:00") : new Date();
+    return { year: base.getFullYear(), month: base.getMonth() };
+  });
+  const monthFadeAnim = useRef(new Animated.Value(1)).current;
+  const grid = getCalendarGrid(ym.year, ym.month);
+
+  const changeMonth = useCallback((updater) => {
+    Animated.timing(monthFadeAnim, {
+      toValue: 0,
+      duration: 70,
+      easing: MOTION.in,
+      useNativeDriver: true,
+    }).start(() => {
+      setYm(updater);
+      Animated.spring(monthFadeAnim, { toValue: 1, ...MOTION.spring }).start();
+    });
+  }, [monthFadeAnim]);
+
+  const prevMonth = useCallback(() =>
+    changeMonth(({ year, month }) => {
+      const d = new Date(year, month - 1);
+      return { year: d.getFullYear(), month: d.getMonth() };
+    }), [changeMonth]);
+
+  const nextMonth = useCallback(() =>
+    changeMonth(({ year, month }) => {
+      const d = new Date(year, month + 1);
+      return { year: d.getFullYear(), month: d.getMonth() };
+    }), [changeMonth]);
+
+  return (
+    <View style={styles.deadlinePicker}>
+      <View style={styles.deadlinePickerNav}>
+        <Pressable onPress={prevMonth} style={({ pressed }) => [styles.deadlinePickerNavBtn, pressed && styles.pressed]}>
+          <Text style={[styles.deadlinePickerNavText, { color: color.muted }]}>{"‹"}</Text>
+        </Pressable>
+        <Animated.Text style={[styles.deadlinePickerMonthLabel, { color: color.fg, opacity: monthFadeAnim }]}>
+          {MONTH_NAMES[ym.month]} {ym.year}
+        </Animated.Text>
+        <Pressable onPress={nextMonth} style={({ pressed }) => [styles.deadlinePickerNavBtn, pressed && styles.pressed]}>
+          <Text style={[styles.deadlinePickerNavText, { color: color.muted }]}>{"›"}</Text>
+        </Pressable>
+      </View>
+      <Animated.View style={[styles.deadlinePickerDowRow, { opacity: monthFadeAnim }]}>
+        {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((dow) => (
+          <Text key={dow} style={[styles.deadlinePickerDow, { color: color.muted }]}>{dow}</Text>
+        ))}
+      </Animated.View>
+      <Animated.View style={[styles.deadlinePickerGrid, { opacity: monthFadeAnim }]}>
+        {grid.map((day, idx) => {
+          if (!day) return <View key={`e-${idx}`} style={styles.deadlinePickerCell} />;
+          const mm = String(ym.month + 1).padStart(2, "0");
+          const dd = String(day).padStart(2, "0");
+          const dayKey = `${ym.year}-${mm}-${dd}`;
+          const isSelected = dayKey === value;
+          const isToday = dayKey === today;
+          const isPast = effectiveMin != null && dayKey < effectiveMin;
+          const isFuture = maxDate ? dayKey > maxDate : false;
+          const isDisabled = isPast || isFuture;
+          return (
+            <Pressable
+              key={dayKey}
+              style={({ pressed }) => [styles.deadlinePickerCell, pressed && !isDisabled && styles.pressed]}
+              onPress={() => { onChange(isSelected ? null : dayKey); onClose(); }}
+              disabled={isDisabled}
+            >
+              <View
+                style={[
+                  styles.deadlinePickerDayInner,
+                  isSelected && { backgroundColor: color.fg },
+                  isToday && !isSelected && styles.deadlinePickerTodayRing,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.deadlinePickerDayText,
+                    { color: isDisabled ? color.muted : isSelected ? color.bg : color.fg },
+                  ]}
+                >
+                  {day}
+                </Text>
+              </View>
+            </Pressable>
+          );
+        })}
+      </Animated.View>
+      {value && (
+        <Pressable onPress={() => { onChange(null); onClose(); }} style={({ pressed }) => [styles.deadlineClearBtn, pressed && styles.pressed]}>
+          <Text style={[styles.deadlineClearBtnText, { color: color.muted }]}>Clear deadline</Text>
+        </Pressable>
+      )}
+    </View>
+  );
+});
+
+const ARCHIVE_DELETE_WIDTH = 72;
+
+const ArchiveListItem = memo(function ArchiveListItem({ item, index, onPress, onDelete, onSwipeOpen }) {
+  const swipeX = useRef(new Animated.Value(0)).current;
+  const isOpen = useRef(false);
+  const onSwipeOpenRef = useRef(onSwipeOpen);
+  onSwipeOpenRef.current = onSwipeOpen;
+
+  const closeAnim = useRef(() => {
+    isOpen.current = false;
+    Animated.spring(swipeX, { toValue: 0, useNativeDriver: true, tension: 180, friction: 26, overshootClamping: true }).start();
+  }).current;
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gs) =>
+        Math.abs(gs.dx) > 3 && Math.abs(gs.dy) < Math.abs(gs.dx) * 1.2,
+      onPanResponderGrant: () => {
+        swipeX.stopAnimation();
+        swipeX.setOffset(isOpen.current ? -ARCHIVE_DELETE_WIDTH : 0);
+        swipeX.setValue(0);
+      },
+      onPanResponderMove: (_, gs) => {
+        swipeX.setValue(Math.max(-ARCHIVE_DELETE_WIDTH, Math.min(0, gs.dx)));
+      },
+      onPanResponderRelease: (_, gs) => {
+        swipeX.flattenOffset();
+        const baseVal = isOpen.current ? -ARCHIVE_DELETE_WIDTH : 0;
+        const projected = baseVal + gs.dx;
+        const shouldOpen = projected < -ARCHIVE_DELETE_WIDTH / 2;
+        if (shouldOpen && !isOpen.current) {
+          onSwipeOpenRef.current?.(closeAnim);
+        }
+        isOpen.current = shouldOpen;
+        Animated.spring(swipeX, {
+          toValue: shouldOpen ? -ARCHIVE_DELETE_WIDTH : 0,
+          useNativeDriver: true,
+          tension: 180,
+          friction: 26,
+          overshootClamping: true,
+        }).start();
+      },
+      onPanResponderTerminate: () => {
+        swipeX.flattenOffset();
+        isOpen.current = false;
+        Animated.spring(swipeX, { toValue: 0, useNativeDriver: true, tension: 180, friction: 26, overshootClamping: true }).start();
+      },
+    }),
+  ).current;
+
+  // counter-translate so text stays visually fixed while the row slides
+  const textX = swipeX.interpolate({
+    inputRange: [-ARCHIVE_DELETE_WIDTH, 0],
+    outputRange: [ARCHIVE_DELETE_WIDTH, 0],
+    extrapolate: "clamp",
+  });
+
+  return (
+    <View style={styles.archiveItemWrap}>
+      <View style={styles.archiveItemDeleteBack}>
+        <Pressable onPress={onDelete} style={({ pressed }) => [styles.archiveItemDeleteBtn, pressed && { opacity: 0.72 }]}>
+          <Ionicons name="trash-outline" size={20} color="#fff" />
+        </Pressable>
+      </View>
+      <Animated.View
+        style={[styles.archiveItemFront, { transform: [{ translateX: swipeX }] }]}
+        {...panResponder.panHandlers}
+      >
+        <Pressable
+          style={({ pressed }) => [
+            styles.archiveEntry,
+            index === 0 && styles.archiveEntryFirst,
+            pressed && styles.archiveEntryPressed,
+          ]}
+          onPress={onPress}
+        >
+          <Animated.View
+            style={[styles.archiveEntryLeft, { transform: [{ translateX: textX }] }]}
+          >
+            <Text style={styles.archiveEntryDate}>{formatHistoryDateLong(item.dayKey)}</Text>
+            <Text style={styles.archiveEntryCount}>
+              {item.total === 1 ? "1 task" : `${item.total} tasks`}
+            </Text>
+          </Animated.View>
+          <Ionicons name="chevron-forward" size={14} color="rgba(255,255,255,0.28)" />
+        </Pressable>
+      </Animated.View>
+    </View>
+  );
+});
 
 function EisenhowerApp() {
   const insets = useSafeAreaInsets();
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const [fontsLoaded] = useFonts({
-    Nunito_600SemiBold: require('@expo-google-fonts/nunito/600SemiBold/Nunito_600SemiBold.ttf'),
-    Nunito_700Bold: require('@expo-google-fonts/nunito/700Bold/Nunito_700Bold.ttf'),
-    Nunito_800ExtraBold: require('@expo-google-fonts/nunito/800ExtraBold/Nunito_800ExtraBold.ttf'),
-    Nunito_900Black: require('@expo-google-fonts/nunito/900Black/Nunito_900Black.ttf'),
+    Nunito_600SemiBold: require("@expo-google-fonts/nunito/600SemiBold/Nunito_600SemiBold.ttf"),
+    Nunito_700Bold: require("@expo-google-fonts/nunito/700Bold/Nunito_700Bold.ttf"),
+    Nunito_800ExtraBold: require("@expo-google-fonts/nunito/800ExtraBold/Nunito_800ExtraBold.ttf"),
+    Nunito_900Black: require("@expo-google-fonts/nunito/900Black/Nunito_900Black.ttf"),
   });
-  const historyWidth = Math.min(windowWidth || 430, 430);
   const [tasks, setTasks] = useState(INIT);
-  const [history, setHistory] = useState([]);
-  const [activeDay, setActiveDay] = useState(getLocalDayKey());
-  const [screen, setScreen] = useState('today');
   const [nextId, setNextId] = useState(getNextId(INIT));
   const [composer, setComposer] = useState(null);
-  const [addVal, setAddVal] = useState('');
+  const [addVal, setAddVal] = useState("");
   const [dragging, setDragging] = useState(null);
   const [dropTarget, setDropTarget] = useState(null);
   const [dropIndex, setDropIndex] = useState(null);
   const [lastDeleted, setLastDeleted] = useState(null);
   const [loaded, setLoaded] = useState(false);
+  const [history, setHistory] = useState([]);
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [archiveScreen, setArchiveScreen] = useState("list");
+  const [repeat, setRepeat] = useState(false);
+  const [viewingDayKey, setViewingDayKey] = useState(null);
+  const [deadline, setDeadline] = useState(null);
+  const [deadlinePickerOpen, setDeadlinePickerOpen] = useState(false);
+  const [movePickerOpen, setMovePickerOpen] = useState(false);
+  const [sortByDeadline, setSortByDeadline] = useState(false);
+  const [editConflict, setEditConflict] = useState(null);
+  const [deleteConflict, setDeleteConflict] = useState(null);
   const [shellHeight, setShellHeight] = useState(0);
   const shellHeightRef = useRef(0);
   const tasksRef = useRef(tasks);
@@ -709,48 +1108,100 @@ function EisenhowerApp() {
   const undoTimer = useRef(null);
   const persistTimer = useRef(null);
   const persistInteraction = useRef(null);
+  const historyRef = useRef([]);
+  const openArchiveRef = useRef(null);
+  const closeArchiveRef = useRef(null);
+  const viewingDayKeyRef = useRef(null);
+  const openArchiveItemRef = useRef(null);
   const composerAnim = useRef(new Animated.Value(0)).current;
+  const archiveAnim = useRef(new Animated.Value(0)).current;
   const dragAnim = useRef(new Animated.Value(0)).current;
   const dragXAnim = useRef(new Animated.Value(0)).current;
   const dragYAnim = useRef(new Animated.Value(0)).current;
   const deleteHotAnim = useRef(new Animated.Value(0)).current;
   const trashAnim = useRef(new Animated.Value(0)).current;
   const undoAnim = useRef(new Animated.Value(0)).current;
-  const historyProgress = useSharedValue(0);
+  const archiveCalAnim = useRef(new Animated.Value(0)).current;
+  const conflictAnim = useRef(new Animated.Value(0)).current;
+  const deleteConflictAnim = useRef(new Animated.Value(0)).current;
+  const splashScaleAnim = useRef(new Animated.Value(1)).current;
+  const splashOpacityAnim = useRef(new Animated.Value(1)).current;
+  const matrixOpacityAnim = useRef(new Animated.Value(0)).current;
 
   tasksRef.current = tasks;
+  historyRef.current = history;
+  viewingDayKeyRef.current = viewingDayKey;
 
   useEffect(() => {
     let mounted = true;
 
     Promise.all([
       AsyncStorage.getItem(STORAGE_KEY),
-      AsyncStorage.getItem(HISTORY_KEY),
       AsyncStorage.getItem(ACTIVE_DAY_KEY),
+      AsyncStorage.getItem(HISTORY_KEY),
     ])
-      .then(([taskValue, historyValue, dayValue]) => {
+      .then(([taskValue, activeDayValue, historyValue]) => {
         if (!mounted) return;
-        const todayKey = getLocalDayKey();
         const storedTasks = taskValue ? JSON.parse(taskValue) : null;
         const storedHistory = historyValue ? JSON.parse(historyValue) : [];
-        let nextHistory = normalizeHistory(storedHistory);
-        const todayEntry = nextHistory.find(entry => entry.dayKey === todayKey);
-        let nextTasks = isValidTasks(storedTasks)
-          ? normalizeTasks(storedTasks)
-          : todayEntry?.tasks || INIT;
-        const storedDay = typeof dayValue === 'string' && dayValue ? dayValue : todayKey;
+        const safeHistory = Array.isArray(storedHistory) ? storedHistory : [];
+        const today = getLocalDayKey();
 
-        if (storedDay !== todayKey) {
-          if (isValidTasks(storedTasks) && hasAnyTasks(nextTasks)) {
-            nextHistory = upsertHistoryEntry(nextHistory, createHistoryEntry(storedDay, nextTasks));
+        let nextTasks;
+        let nextHistory = safeHistory;
+
+        if (
+          activeDayValue &&
+          activeDayValue !== today &&
+          isValidTasks(storedTasks)
+        ) {
+          nextHistory = upsertHistoryEntry(safeHistory, activeDayValue, storedTasks);
+          nextTasks = createEmptyTasks();
+          QUADS.forEach((q) => {
+            nextTasks[q.id] = (storedTasks[q.id] || [])
+              .filter((t) => t.repeat || (t.deadline && !t.done))
+              .map((t) => ({ ...t, done: false }));
+          });
+          AsyncStorage.multiSet([
+            [HISTORY_KEY, JSON.stringify(nextHistory)],
+            [ACTIVE_DAY_KEY, today],
+            [STORAGE_KEY, JSON.stringify(nextTasks)],
+          ]).catch(() => {});
+        } else {
+          nextTasks = isValidTasks(storedTasks) ? normalizeTasks(storedTasks) : INIT;
+          if (!activeDayValue) {
+            AsyncStorage.setItem(ACTIVE_DAY_KEY, today).catch(() => {});
           }
-          nextTasks = normalizeTasks(nextHistory.find(entry => entry.dayKey === todayKey)?.tasks || createEmptyTasks());
+        }
+
+        // Inject repeat and undone-deadline tasks from past history into today's tasks.
+        // Covers tasks created via archive on past days that weren't propagated yet.
+        {
+          const seen = new Set();
+          QUADS.forEach((q) => nextTasks[q.id].forEach((t) => seen.add(t.id)));
+          const pastEntries = nextHistory
+            .filter((e) => e.dayKey < today)
+            .sort((a, b) => b.dayKey.localeCompare(a.dayKey));
+          for (const past of pastEntries) {
+            QUADS.forEach((q) => {
+              (past.tasks[q.id] || []).forEach((t) => {
+                if (seen.has(t.id)) return;
+                seen.add(t.id);
+                const shouldPropagate =
+                  (t.repeat && (!t.deadline || t.deadline >= today)) ||
+                  (!t.repeat && t.deadline && t.deadline >= today && !t.done);
+                if (shouldPropagate) {
+                  nextTasks[q.id].push({ ...t, done: false });
+                }
+              });
+            });
+          }
         }
 
         setTasks(nextTasks);
-        setHistory(nextHistory);
-        setActiveDay(todayKey);
         setNextId(getNextId(nextTasks));
+        historyRef.current = nextHistory;
+        setHistory(nextHistory);
       })
       .catch(() => {})
       .finally(() => {
@@ -767,55 +1218,27 @@ function EisenhowerApp() {
     clearTimeout(persistTimer.current);
     persistTimer.current = setTimeout(() => {
       persistInteraction.current?.cancel?.();
-      const taskPayload = JSON.stringify(tasks);
-      const historyPayload = JSON.stringify(upsertHistoryEntry(history, createHistoryEntry(activeDay, tasks)));
-      persistInteraction.current = InteractionManager.runAfterInteractions(() => {
-        AsyncStorage.multiSet([
-          [STORAGE_KEY, taskPayload],
-          [HISTORY_KEY, historyPayload],
-        ]).catch(() => {});
-      });
+      const vdk = viewingDayKeyRef.current;
+      if (vdk) {
+        const nextHistory = upsertHistoryEntry(historyRef.current, vdk, tasks);
+        historyRef.current = nextHistory;
+        persistInteraction.current = InteractionManager.runAfterInteractions(() => {
+          setHistory(nextHistory);
+          AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(nextHistory)).catch(() => {});
+        });
+      } else {
+        const today = getLocalDayKey();
+        const nextHistory = upsertHistoryEntry(historyRef.current, today, tasks);
+        historyRef.current = nextHistory;
+        const taskPayload = JSON.stringify(tasks);
+        persistInteraction.current = InteractionManager.runAfterInteractions(() => {
+          setHistory(nextHistory);
+          AsyncStorage.setItem(STORAGE_KEY, taskPayload).catch(() => {});
+          AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(nextHistory)).catch(() => {});
+        });
+      }
     }, PERSIST_DELAY);
-  }, [activeDay, history, loaded, tasks]);
-
-  useEffect(() => {
-    if (!loaded) return;
-    InteractionManager.runAfterInteractions(() => {
-      AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(history)).catch(() => {});
-    });
-  }, [history, loaded]);
-
-  useEffect(() => {
-    if (!loaded) return;
-    AsyncStorage.setItem(ACTIVE_DAY_KEY, activeDay).catch(() => {});
-  }, [activeDay, loaded]);
-
-  const archiveAndResetForNewDay = useCallback(() => {
-    const todayKey = getLocalDayKey();
-    if (activeDay === todayKey) return;
-    const snapshot = tasksRef.current;
-    let nextHistory = history;
-    if (hasAnyTasks(snapshot)) {
-      const entry = createHistoryEntry(activeDay, snapshot);
-      nextHistory = upsertHistoryEntry(history, entry);
-      setHistory(nextHistory);
-    }
-    setActiveDay(todayKey);
-    const todayEntry = nextHistory.find(entry => entry.dayKey === todayKey);
-    const nextTasks = todayEntry ? normalizeTasks(todayEntry.tasks) : createEmptyTasks();
-    setTasks(nextTasks);
-    setNextId(getNextId(nextTasks));
-    setLastDeleted(null);
-    clearTimeout(undoTimer.current);
-  }, [activeDay, history]);
-
-  useEffect(() => {
-    if (!loaded) return undefined;
-    const subscription = AppState.addEventListener('change', nextState => {
-      if (nextState === 'active') archiveAndResetForNewDay();
-    });
-    return () => subscription.remove();
-  }, [archiveAndResetForNewDay, loaded]);
+  }, [loaded, tasks]);
 
   useEffect(() => {
     trashAnim.stopAnimation();
@@ -824,7 +1247,7 @@ function EisenhowerApp() {
 
   useEffect(() => {
     deleteHotAnim.stopAnimation();
-    deleteHotAnim.setValue(dropTarget === 'trash' ? 1 : 0);
+    deleteHotAnim.setValue(dropTarget === "trash" ? 1 : 0);
   }, [deleteHotAnim, dropTarget]);
 
   useEffect(() => {
@@ -832,21 +1255,71 @@ function EisenhowerApp() {
       undoAnim.setValue(0);
       return;
     }
-    Animated.timing(undoAnim, {
-      toValue: 1,
-      duration: MOTION.enter,
-      easing: MOTION.out,
-      useNativeDriver: true,
-    }).start();
+    Animated.spring(undoAnim, { toValue: 1, ...MOTION.spring }).start();
   }, [dragging, lastDeleted, undoAnim]);
 
-  useEffect(() => () => {
-    clearTimeout(undoTimer.current);
-    clearTimeout(persistTimer.current);
-    persistInteraction.current?.cancel?.();
-    if (autoScrollFrame.current) cancelAnimationFrame(autoScrollFrame.current);
-    if (dragMoveFrame.current) cancelAnimationFrame(dragMoveFrame.current);
-  }, []);
+  useEffect(() => {
+    if (!editConflict) return;
+    conflictAnim.setValue(0);
+    Animated.spring(conflictAnim, { toValue: 1, ...MOTION.springFast }).start();
+  }, [editConflict, conflictAnim]);
+
+  useEffect(() => {
+    if (!deleteConflict) return;
+    deleteConflictAnim.setValue(0);
+    Animated.spring(deleteConflictAnim, { toValue: 1, ...MOTION.springFast }).start();
+  }, [deleteConflict, deleteConflictAnim]);
+
+  useEffect(() => {
+    if (!loaded || !fontsLoaded) return;
+    const splashSize = Math.min(windowWidth || 390, windowHeight || 844) * SPLASH_GRID_RATIO;
+    const targetScale = Math.max(windowWidth || 390, windowHeight || 844) / splashSize * 1.6;
+    // Small delay lets the native layer apply the loaded fonts before the matrix fades in.
+    const fontSettle = setTimeout(() => {
+    Animated.parallel([
+      Animated.spring(splashScaleAnim, {
+        toValue: targetScale,
+        tension: 38,
+        friction: 9,
+        overshootClamping: true,
+        useNativeDriver: true,
+      }),
+      Animated.sequence([
+        Animated.delay(280),
+        Animated.timing(splashOpacityAnim, {
+          toValue: 0,
+          duration: 220,
+          easing: MOTION.in,
+          useNativeDriver: true,
+        }),
+      ]),
+      // matrix fades in slightly behind splash fade-out — cross-fade, no white frame
+      Animated.sequence([
+        Animated.delay(300),
+        Animated.timing(matrixOpacityAnim, {
+          toValue: 1,
+          duration: 200,
+          easing: MOTION.out,
+          useNativeDriver: true,
+        }),
+      ]),
+    ]).start();
+    }, 60);
+    return () => clearTimeout(fontSettle);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, fontsLoaded]);
+
+  useEffect(
+    () => () => {
+      clearTimeout(undoTimer.current);
+      clearTimeout(persistTimer.current);
+      persistInteraction.current?.cancel?.();
+      if (autoScrollFrame.current)
+        cancelAnimationFrame(autoScrollFrame.current);
+      if (dragMoveFrame.current) cancelAnimationFrame(dragMoveFrame.current);
+    },
+    [],
+  );
 
   const measureTargets = () => {
     shellRef.current?.measureInWindow((x, y, width, height) => {
@@ -860,7 +1333,7 @@ function EisenhowerApp() {
         height,
       };
     });
-    QUADS.forEach(q => {
+    QUADS.forEach((q) => {
       quadRefs.current[q.id]?.measureInWindow((x, y, width, height) => {
         quadRects.current[q.id] = { x, y, width, height };
       });
@@ -870,7 +1343,7 @@ function EisenhowerApp() {
     });
   };
 
-  const handleShellLayout = event => {
+  const handleShellLayout = (event) => {
     const { height } = event.nativeEvent.layout;
     if (height > 0 && height > shellHeightRef.current) {
       shellHeightRef.current = height;
@@ -881,15 +1354,28 @@ function EisenhowerApp() {
 
   const targetAt = (x, y) => {
     const trash = trashRect.current;
-    if (trash && x >= trash.x && x <= trash.x + trash.width && y >= trash.y && y <= trash.y + trash.height) {
-      return { type: 'trash' };
+    if (
+      trash &&
+      x >= trash.x &&
+      x <= trash.x + trash.width &&
+      y >= trash.y &&
+      y <= trash.y + trash.height
+    ) {
+      return { type: "trash" };
     }
-    const quad = QUADS.find(q => {
+    const quad = QUADS.find((q) => {
       const rect = quadRects.current[q.id];
-      return rect && x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height;
+      return (
+        rect &&
+        x >= rect.x &&
+        x <= rect.x + rect.width &&
+        y >= rect.y &&
+        y <= rect.y + rect.height
+      );
     });
     if (!quad) return null;
-    const taskArea = taskAreaRects.current[quad.id] || quadRects.current[quad.id];
+    const taskArea =
+      taskAreaRects.current[quad.id] || quadRects.current[quad.id];
     const scrollOffset = taskScrollOffsets.current[quad.id] || 0;
     const relativeY = Math.max(0, y - taskArea.y + scrollOffset);
     const layouts = taskLayouts.current[quad.id] || {};
@@ -904,10 +1390,19 @@ function EisenhowerApp() {
       }
     }
 
-    markerIndex = constrainDropIndexByDone(slots, markerIndex, draggingRef.current?.task);
-    const index = getMoveIndexFromMarker(list, quad.id, markerIndex, draggingRef.current);
+    markerIndex = constrainDropIndexByDone(
+      slots,
+      markerIndex,
+      draggingRef.current?.task,
+    );
+    const index = getMoveIndexFromMarker(
+      list,
+      quad.id,
+      markerIndex,
+      draggingRef.current,
+    );
 
-    return { type: 'quad', qid: quad.id, index, markerIndex };
+    return { type: "quad", qid: quad.id, index, markerIndex };
   };
 
   const resolveDragTarget = (x, y, force = false) => {
@@ -920,9 +1415,10 @@ function EisenhowerApp() {
     return targetAt(x, y);
   };
 
-  const setActiveDropTarget = target => {
-    const nextDropTarget = target?.type === 'trash' ? 'trash' : target?.qid || null;
-    const nextDropIndex = target?.type === 'quad' ? target.markerIndex : null;
+  const setActiveDropTarget = (target) => {
+    const nextDropTarget =
+      target?.type === "trash" ? "trash" : target?.qid || null;
+    const nextDropIndex = target?.type === "quad" ? target.markerIndex : null;
 
     dropTargetRef.current = target;
 
@@ -938,13 +1434,16 @@ function EisenhowerApp() {
   };
 
   const canAutoScroll = (target, y) => {
-    if (target?.type !== 'quad') return false;
+    if (target?.type !== "quad") return false;
     const area = taskAreaRects.current[target.qid];
     const contentHeight = taskContentHeights.current[target.qid] || 0;
     const viewHeight = area?.height || 0;
     const maxOffset = Math.max(0, contentHeight - viewHeight);
     if (!area || maxOffset <= 0) return false;
-    return y < area.y + AUTO_SCROLL_EDGE || y > area.y + area.height - AUTO_SCROLL_EDGE;
+    return (
+      y < area.y + AUTO_SCROLL_EDGE ||
+      y > area.y + area.height - AUTO_SCROLL_EDGE
+    );
   };
 
   const stopAutoScroll = () => {
@@ -962,7 +1461,7 @@ function EisenhowerApp() {
 
     const target = dropTargetRef.current;
 
-    if (target?.type === 'quad') {
+    if (target?.type === "quad") {
       const qid = target.qid;
       const area = taskAreaRects.current[qid];
       const contentHeight = taskContentHeights.current[qid] || 0;
@@ -974,18 +1473,37 @@ function EisenhowerApp() {
         let delta = 0;
 
         if (current.y < area.y + AUTO_SCROLL_EDGE) {
-          const intensity = Math.min(1, Math.max(0, (area.y + AUTO_SCROLL_EDGE - current.y) / AUTO_SCROLL_EDGE));
+          const intensity = Math.min(
+            1,
+            Math.max(
+              0,
+              (area.y + AUTO_SCROLL_EDGE - current.y) / AUTO_SCROLL_EDGE,
+            ),
+          );
           delta = -Math.ceil(2 + intensity * 7);
         } else if (current.y > area.y + area.height - AUTO_SCROLL_EDGE) {
-          const intensity = Math.min(1, Math.max(0, (current.y - (area.y + area.height - AUTO_SCROLL_EDGE)) / AUTO_SCROLL_EDGE));
+          const intensity = Math.min(
+            1,
+            Math.max(
+              0,
+              (current.y - (area.y + area.height - AUTO_SCROLL_EDGE)) /
+                AUTO_SCROLL_EDGE,
+            ),
+          );
           delta = Math.ceil(2 + intensity * 7);
         }
 
         if (delta !== 0) {
-          const nextOffset = Math.max(0, Math.min(maxOffset, currentOffset + delta));
+          const nextOffset = Math.max(
+            0,
+            Math.min(maxOffset, currentOffset + delta),
+          );
           if (nextOffset !== currentOffset) {
             taskScrollOffsets.current[qid] = nextOffset;
-            taskListRefs.current[qid]?.scrollToOffset({ offset: nextOffset, animated: false });
+            taskListRefs.current[qid]?.scrollToOffset({
+              offset: nextOffset,
+              animated: false,
+            });
             setActiveDropTarget(resolveDragTarget(current.x, current.y));
           }
         }
@@ -999,7 +1517,7 @@ function EisenhowerApp() {
     }
   };
 
-  const syncAutoScroll = target => {
+  const syncAutoScroll = (target) => {
     const current = draggingRef.current;
     if (!current || !canAutoScroll(target, current.y)) {
       stopAutoScroll();
@@ -1010,80 +1528,23 @@ function EisenhowerApp() {
     autoScrollFrame.current = requestAnimationFrame(runAutoScroll);
   };
 
-  const mountHistoryForGesture = useCallback(() => {
-    Keyboard.dismiss();
-    setScreen('history');
-  }, []);
-
-  const finishCloseHistory = useCallback(() => {
-    setScreen('today');
-  }, []);
-
-  const closeHistory = useCallback((animated = true) => {
-    if (!animated) {
-      historyProgress.value = 0;
-      finishCloseHistory();
-      return;
-    }
-    historyProgress.value = withTiming(0, { duration: MOTION.exit }, finished => {
-      if (finished) runOnJS(finishCloseHistory)();
-    });
-  }, [finishCloseHistory, historyProgress]);
-
-  const openHistoryGesture = useMemo(() => Gesture.Pan()
-    .enabled(screen === 'today' && !dragging && !composer)
-    .activeOffsetX([-9999, 10])
-    .failOffsetY([-24, 24])
-    .onStart(() => {
-      historyProgress.value = 0;
-      runOnJS(mountHistoryForGesture)();
-    })
-    .onUpdate(event => {
-      historyProgress.value = clamp01(event.translationX / HISTORY_OPEN_TRIGGER);
-    })
-    .onEnd(event => {
-      const shouldOpen = historyProgress.value > 0.42 || event.velocityX > 520;
-      historyProgress.value = withTiming(shouldOpen ? 1 : 0, { duration: shouldOpen ? MOTION.enter : MOTION.exit }, finished => {
-        if (finished && !shouldOpen) runOnJS(finishCloseHistory)();
-      });
-    }), [composer, dragging, finishCloseHistory, historyProgress, mountHistoryForGesture, screen]);
-
-  const closeHistoryGesture = useMemo(() => Gesture.Pan()
-    .enabled(screen === 'history')
-    .activeOffsetX([-10, 9999])
-    .failOffsetY([-24, 24])
-    .onUpdate(event => {
-      historyProgress.value = clamp01(1 + event.translationX / HISTORY_CLOSE_TRIGGER);
-    })
-    .onEnd(event => {
-      const shouldClose = historyProgress.value < 0.58 || event.velocityX < -520;
-      historyProgress.value = withTiming(shouldClose ? 0 : 1, { duration: shouldClose ? MOTION.exit : MOTION.enter }, finished => {
-        if (finished && shouldClose) runOnJS(finishCloseHistory)();
-      });
-    }), [finishCloseHistory, historyProgress, screen]);
-
-  const historyScreenStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: -historyWidth * (1 - historyProgress.value) }],
-  }));
-
   const openComposer = (qid, task = null) => {
     composerAnim.stopAnimation();
     setComposer({ qid, taskId: task?.id || null });
-    setAddVal(task?.text || '');
+    setAddVal(task?.text || "");
+    setRepeat(task?.repeat || false);
+    setDeadline(task?.deadline || null);
+    setDeadlinePickerOpen(false);
+    setMovePickerOpen(false);
     composerAnim.setValue(0);
-    Animated.timing(composerAnim, {
-      toValue: 1,
-      duration: MOTION.enter,
-      easing: MOTION.out,
-      useNativeDriver: true,
-    }).start();
+    Animated.spring(composerAnim, { toValue: 1, ...MOTION.spring }).start();
   };
 
   const closeComposer = (animated = true) => {
     if (!composer) return;
     const finish = () => {
       setComposer(null);
-      setAddVal('');
+      setAddVal("");
       Keyboard.dismiss();
     };
     composerAnim.stopAnimation();
@@ -1097,46 +1558,145 @@ function EisenhowerApp() {
       duration: MOTION.exit,
       easing: MOTION.in,
       useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (finished) finish();
-    });
+    }).start(({ finished }) => { if (finished) finish(); });
   };
 
-  const selectHistoryDay = useCallback(dayKey => {
-    const nextHistory = upsertHistoryEntry(history, createHistoryEntry(activeDay, tasksRef.current));
-    const entry = getHistoryEntryForDay(nextHistory, dayKey, activeDay, tasksRef.current);
-    const nextTasks = entry ? normalizeTasks(entry.tasks) : createEmptyTasks();
-    setHistory(nextHistory);
-    setActiveDay(dayKey);
-    setTasks(nextTasks);
-    setNextId(getNextId(nextTasks));
-    setLastDeleted(null);
-    clearTimeout(undoTimer.current);
-    closeHistory();
-  }, [activeDay, closeHistory, history]);
-
   const toggleTask = (qid, tid) => {
-    setTasks(prev => ({
+    const task = tasksRef.current[qid]?.find((t) => t.id === tid);
+    const newDone = task ? !task.done : false;
+    if (task && !task.repeat && task.deadline) {
+      const currentDayKey = viewingDayKeyRef.current || getLocalDayKey();
+      const appearsElsewhere = historyRef.current.some(
+        (entry) =>
+          entry.dayKey !== currentDayKey &&
+          QUADS.some((q) => (entry.tasks[q.id] || []).some((t) => t.id === tid)),
+      );
+      if (appearsElsewhere) {
+        const nextHistory = historyRef.current.map((entry) => {
+          const inEntry = QUADS.some((q) => (entry.tasks[q.id] || []).some((t) => t.id === tid));
+          if (!inEntry) return entry;
+          const updatedTasks = QUADS.reduce((acc, q) => {
+            acc[q.id] = (entry.tasks[q.id] || []).map((t) =>
+              t.id === tid ? { ...t, done: newDone } : t,
+            );
+            return acc;
+          }, { ...entry.tasks });
+          return { ...entry, tasks: updatedTasks };
+        });
+        historyRef.current = nextHistory;
+        setHistory(nextHistory);
+        AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(nextHistory)).catch(() => {});
+      }
+    }
+    setTasks((prev) => ({
       ...prev,
-      [qid]: orderTasksByDone(prev[qid].map(task => task.id === tid ? { ...task, done: !task.done } : task)),
+      [qid]: orderTasksByDone(
+        prev[qid].map((t) => t.id === tid ? { ...t, done: newDone } : t),
+      ),
     }));
   };
 
   const deleteTask = (qid, tid) => {
-    setTasks(prev => {
-      const index = prev[qid].findIndex(task => task.id === tid);
+    const currentDayKey = viewingDayKeyRef.current || getLocalDayKey();
+    const appearsElsewhere = historyRef.current.some(
+      (entry) =>
+        entry.dayKey !== currentDayKey &&
+        QUADS.some((q) => (entry.tasks[q.id] || []).some((t) => t.id === tid)),
+    );
+    if (appearsElsewhere) {
+      setDeleteConflict({ qid, tid });
+      return;
+    }
+    setTasks((prev) => {
+      const index = prev[qid].findIndex((task) => task.id === tid);
       if (index === -1) return prev;
       const task = prev[qid][index];
       setLastDeleted({ qid, task, index });
       clearTimeout(undoTimer.current);
       undoTimer.current = setTimeout(() => setLastDeleted(null), 4500);
-      return { ...prev, [qid]: prev[qid].filter(item => item.id !== tid) };
+      return { ...prev, [qid]: prev[qid].filter((item) => item.id !== tid) };
     });
   };
 
+  const confirmDeleteThisOnly = useCallback(() => {
+    if (!deleteConflict) return;
+    const { qid, tid } = deleteConflict;
+    setTasks((prev) => {
+      const index = prev[qid].findIndex((t) => t.id === tid);
+      if (index === -1) return prev;
+      const task = prev[qid][index];
+      setLastDeleted({ qid, task, index });
+      clearTimeout(undoTimer.current);
+      undoTimer.current = setTimeout(() => setLastDeleted(null), 4500);
+      return { ...prev, [qid]: prev[qid].filter((t) => t.id !== tid) };
+    });
+    setDeleteConflict(null);
+  }, [deleteConflict]);
+
+  const confirmDeleteFromHere = useCallback(() => {
+    if (!deleteConflict) return;
+    const { qid, tid } = deleteConflict;
+    const currentDayKey = viewingDayKeyRef.current || getLocalDayKey();
+    const d = new Date(currentDayKey + 'T12:00:00');
+    d.setDate(d.getDate() - 1);
+    const dayBefore = getLocalDayKey(d);
+    const nextHistory = historyRef.current.map((entry) => {
+      const inEntry = QUADS.some((q) => (entry.tasks[q.id] || []).some((t) => t.id === tid));
+      if (!inEntry) return entry;
+      if (entry.dayKey < currentDayKey) {
+        // Past entries: stop future propagation without deleting history.
+        // - repeat + deadline → shrink deadline to day before currentDayKey
+        // - repeat only → strip repeat flag
+        // - deadline only → leave as-is (already won't propagate past deadline)
+        const updatedTasks = QUADS.reduce((acc, q) => {
+          acc[q.id] = (entry.tasks[q.id] || []).map((t) => {
+            if (t.id !== tid) return t;
+            if (t.repeat && t.deadline) return { ...t, deadline: dayBefore };
+            if (t.repeat) return { ...t, repeat: false };
+            return t;
+          });
+          return acc;
+        }, { ...entry.tasks });
+        return { ...entry, tasks: updatedTasks };
+      }
+      // Current day and future: remove task entirely
+      const updatedTasks = QUADS.reduce((acc, q) => {
+        acc[q.id] = (entry.tasks[q.id] || []).filter((t) => t.id !== tid);
+        return acc;
+      }, { ...entry.tasks });
+      const total = QUADS.reduce((s, q) => s + updatedTasks[q.id].length, 0);
+      return { ...entry, tasks: updatedTasks, total };
+    });
+    historyRef.current = nextHistory;
+    setHistory(nextHistory);
+    AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(nextHistory)).catch(() => {});
+    setTasks((prev) => ({ ...prev, [qid]: prev[qid].filter((t) => t.id !== tid) }));
+    setDeleteConflict(null);
+  }, [deleteConflict]);
+
+  const confirmDeleteAll = useCallback(() => {
+    if (!deleteConflict) return;
+    const { qid, tid } = deleteConflict;
+    const nextHistory = historyRef.current.map((entry) => {
+      const inEntry = QUADS.some((q) => (entry.tasks[q.id] || []).some((t) => t.id === tid));
+      if (!inEntry) return entry;
+      const updatedTasks = QUADS.reduce((acc, q) => {
+        acc[q.id] = (entry.tasks[q.id] || []).filter((t) => t.id !== tid);
+        return acc;
+      }, { ...entry.tasks });
+      const total = QUADS.reduce((s, q) => s + updatedTasks[q.id].length, 0);
+      return { ...entry, tasks: updatedTasks, total };
+    });
+    historyRef.current = nextHistory;
+    setHistory(nextHistory);
+    AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(nextHistory)).catch(() => {});
+    setTasks((prev) => ({ ...prev, [qid]: prev[qid].filter((t) => t.id !== tid) }));
+    setDeleteConflict(null);
+  }, [deleteConflict]);
+
   const undoDelete = () => {
     if (!lastDeleted) return;
-    setTasks(prev => {
+    setTasks((prev) => {
       const list = [...prev[lastDeleted.qid]];
       list.splice(lastDeleted.index, 0, lastDeleted.task);
       return { ...prev, [lastDeleted.qid]: orderTasksByDone(list) };
@@ -1145,13 +1705,222 @@ function EisenhowerApp() {
     setLastDeleted(null);
   };
 
+  const closeArchive = useCallback(
+    (onDone) => {
+      archiveAnim.stopAnimation();
+      Animated.timing(archiveAnim, {
+        toValue: 0,
+        duration: 240,
+        easing: MOTION.in,
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (finished) {
+          setArchiveOpen(false);
+          onDone?.();
+        }
+      });
+    },
+    [archiveAnim],
+  );
+
+  const openArchive = useCallback(() => {
+    setArchiveOpen(true);
+    setArchiveScreen("list");
+    archiveAnim.stopAnimation();
+    archiveAnim.setValue(0);
+    Animated.spring(archiveAnim, { toValue: 1, ...MOTION.springPanel }).start();
+  }, [archiveAnim]);
+
+  openArchiveRef.current = openArchive;
+  closeArchiveRef.current = closeArchive;
+
+  const loadDayToMainScreen = useCallback((dayKey) => {
+    const today = getLocalDayKey();
+    // Flush the current day's tasks into historyRef before scanning for propagation.
+    // Without this, repeat/deadline tasks created after the last persist-timer fire
+    // won't be found when scanning past entries for the target day.
+    const currentDayKey = viewingDayKeyRef.current || today;
+    if (currentDayKey !== dayKey) {
+      historyRef.current = upsertHistoryEntry(historyRef.current, currentDayKey, tasksRef.current);
+    }
+    closeArchive(() => {
+      const entry = historyRef.current.find((e) => e.dayKey === dayKey);
+      // Use stored entry only if it has tasks (non-empty). Empty entries are created
+      // automatically by the persist effect and should not block repeat propagation.
+      const useEntry = entry && entry.total > 0;
+      let nextTasks;
+      if (useEntry) {
+        nextTasks = normalizeTasks(entry.tasks);
+        // Remove repeat tasks whose deadline has passed for this day (bug #3).
+        QUADS.forEach((q) => {
+          nextTasks[q.id] = nextTasks[q.id].filter(
+            (t) => !(t.repeat && t.deadline && t.deadline < dayKey),
+          );
+        });
+      } else {
+        nextTasks = createEmptyTasks();
+      }
+      // Inject tasks from earlier history that aren't already present.
+      // - Repeat tasks: always propagate (each day is a fresh start).
+      // - Deadline-only tasks: propagate if undone in the most-recent past entry.
+      // Scan most-recent first so the latest done-state wins.
+      const seen = new Set();
+      QUADS.forEach((q) => nextTasks[q.id].forEach((t) => seen.add(t.id)));
+      const pastEntries = historyRef.current
+        .filter((e) => e.dayKey < dayKey)
+        .sort((a, b) => b.dayKey.localeCompare(a.dayKey));
+      for (const past of pastEntries) {
+        QUADS.forEach((q) => {
+          (past.tasks[q.id] || []).forEach((t) => {
+            if (seen.has(t.id)) return;
+            seen.add(t.id);
+            const shouldPropagate =
+              (t.repeat && (!t.deadline || t.deadline >= dayKey)) ||
+              (!t.repeat && t.deadline && t.deadline >= dayKey && !t.done);
+            if (shouldPropagate) {
+              nextTasks[q.id].push({ ...t, done: false });
+            }
+          });
+        });
+      }
+      setTasks(nextTasks);
+      setNextId(getNextId(nextTasks));
+      setViewingDayKey(dayKey === today ? null : dayKey);
+    });
+  }, [closeArchive]);
+
+  const goToToday = useCallback(() => {
+    const vdk = viewingDayKeyRef.current;
+    if (vdk) {
+      const nextHistory = upsertHistoryEntry(historyRef.current, vdk, tasksRef.current);
+      historyRef.current = nextHistory;
+      setHistory(nextHistory);
+      AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(nextHistory)).catch(() => {});
+    }
+    AsyncStorage.getItem(STORAGE_KEY).then((value) => {
+      const storedTasks = value ? JSON.parse(value) : null;
+      const todayTasks = isValidTasks(storedTasks) ? normalizeTasks(storedTasks) : createEmptyTasks();
+      const today = getLocalDayKey();
+      // Inject tasks from past history: repeat tasks (fresh each day) and
+      // deadline-only tasks that are undone in their most-recent past entry.
+      const seen = new Set();
+      QUADS.forEach((q) => todayTasks[q.id].forEach((t) => seen.add(t.id)));
+      const pastEntries = historyRef.current
+        .filter((e) => e.dayKey < today)
+        .sort((a, b) => b.dayKey.localeCompare(a.dayKey));
+      for (const past of pastEntries) {
+        QUADS.forEach((q) => {
+          (past.tasks[q.id] || []).forEach((t) => {
+            if (seen.has(t.id)) return;
+            seen.add(t.id);
+            const shouldPropagate =
+              (t.repeat && (!t.deadline || t.deadline >= today)) ||
+              (!t.repeat && t.deadline && t.deadline >= today && !t.done);
+            if (shouldPropagate) {
+              todayTasks[q.id].push({ ...t, done: false });
+            }
+          });
+        });
+      }
+      setTasks(todayTasks);
+      setNextId(getNextId(todayTasks));
+      setViewingDayKey(null);
+    }).catch(() => { setViewingDayKey(null); });
+  }, []);
+
+  const deleteHistoryEntry = useCallback((dayKey) => {
+    const today = getLocalDayKey();
+    if (dayKey === today) {
+      // Today: clear tasks rather than delete the entry, so the day isn't lost.
+      const emptyTasks = createEmptyTasks();
+      const nextHistory = upsertHistoryEntry(historyRef.current, today, emptyTasks);
+      historyRef.current = nextHistory;
+      setHistory(nextHistory);
+      AsyncStorage.multiSet([
+        [STORAGE_KEY, JSON.stringify(emptyTasks)],
+        [HISTORY_KEY, JSON.stringify(nextHistory)],
+      ]).catch(() => {});
+      if (!viewingDayKeyRef.current) {
+        setTasks(emptyTasks);
+        setNextId(1);
+      }
+      return;
+    }
+    const nextHistory = historyRef.current.filter((e) => e.dayKey !== dayKey);
+    historyRef.current = nextHistory;
+    setHistory(nextHistory);
+    AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(nextHistory)).catch(() => {});
+    if (viewingDayKeyRef.current === dayKey) {
+      AsyncStorage.getItem(STORAGE_KEY).then((value) => {
+        const storedTasks = value ? JSON.parse(value) : null;
+        const nextTasks = isValidTasks(storedTasks) ? normalizeTasks(storedTasks) : createEmptyTasks();
+        setTasks(nextTasks);
+        setNextId(getNextId(nextTasks));
+        setViewingDayKey(null);
+      }).catch(() => { setViewingDayKey(null); });
+    }
+  }, []);
+
+  const handleCalendarSelect = useCallback((dayKey) => {
+    loadDayToMainScreen(dayKey);
+  }, [loadDayToMainScreen]);
+
+  const handleArchiveAddDate = useCallback(() => {
+    setArchiveScreen("calendar");
+    archiveCalAnim.setValue(0);
+    Animated.spring(archiveCalAnim, { toValue: 1, ...MOTION.spring }).start();
+  }, [archiveCalAnim]);
+
+  const handleCalendarBack = useCallback(() => {
+    Animated.timing(archiveCalAnim, {
+      toValue: 0,
+      duration: 200,
+      easing: MOTION.in,
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) setArchiveScreen("list");
+    });
+  }, [archiveCalAnim]);
+
+  const edgePanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        return (
+          !draggingRef.current &&
+          gestureState.dx < -8 &&
+          Math.abs(gestureState.dy) < Math.abs(gestureState.dx) * 0.8
+        );
+      },
+      onPanResponderGrant: () => {},
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dx < -48) {
+          openArchiveRef.current?.();
+        }
+      },
+      onPanResponderTerminate: () => {},
+    }),
+  ).current;
+
+  const archiveSwipePanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gs) =>
+        gs.dx > 10 && Math.abs(gs.dy) < Math.abs(gs.dx) * 0.8,
+      onPanResponderRelease: (_, gs) => {
+        if (gs.dx > 60) closeArchiveRef.current?.();
+      },
+      onPanResponderTerminate: () => {},
+    }),
+  ).current;
+
   const moveTask = (from, tid, to, toIndex) => {
-    setTasks(prev => {
+    setTasks((prev) => {
       const fromList = prev[from];
-      const fromIndex = fromList.findIndex(item => item.id === tid);
+      const fromIndex = fromList.findIndex((item) => item.id === tid);
       if (fromIndex === -1) return prev;
       const task = fromList[fromIndex];
-      const nextFrom = fromList.filter(item => item.id !== tid);
+      const nextFrom = fromList.filter((item) => item.id !== tid);
       const nextToBase = from === to ? nextFrom : [...prev[to]];
       let insertAt = Number.isInteger(toIndex) ? toIndex : nextToBase.length;
       insertAt = Math.max(0, Math.min(nextToBase.length, insertAt));
@@ -1159,7 +1928,8 @@ function EisenhowerApp() {
       nextTo.splice(insertAt, 0, task);
       return {
         ...prev,
-        [from]: from === to ? orderTasksByDone(nextTo) : orderTasksByDone(nextFrom),
+        [from]:
+          from === to ? orderTasksByDone(nextTo) : orderTasksByDone(nextFrom),
         ...(from === to ? {} : { [to]: orderTasksByDone(nextTo) }),
       };
     });
@@ -1169,17 +1939,146 @@ function EisenhowerApp() {
     const text = addVal.trim();
     if (!text || !composer) return;
     if (composer.taskId) {
-      setTasks(prev => ({
+      const originalTask = tasks[composer.qid]?.find((t) => t.id === composer.taskId);
+      if (originalTask) {
+        const nothingChanged =
+          text === originalTask.text &&
+          repeat === (originalTask.repeat ?? false) &&
+          deadline === (originalTask.deadline ?? null);
+        if (nothingChanged) {
+          closeComposer();
+          return;
+        }
+      }
+      if (originalTask && (originalTask.repeat || originalTask.deadline)) {
+        const currentDayKey = viewingDayKeyRef.current || getLocalDayKey();
+        const appearsElsewhere = historyRef.current.some(
+          (entry) =>
+            entry.dayKey !== currentDayKey &&
+            QUADS.some((q) => (entry.tasks[q.id] || []).some((t) => t.id === originalTask.id)),
+        );
+        if (appearsElsewhere) {
+          setEditConflict({ qid: composer.qid, taskId: composer.taskId, text, newRepeat: repeat, newDeadline: deadline });
+          return;
+        }
+      }
+      setTasks((prev) => ({
         ...prev,
-        [composer.qid]: prev[composer.qid].map(task => task.id === composer.taskId ? { ...task, text } : task),
+        [composer.qid]: prev[composer.qid].map((task) =>
+          task.id === composer.taskId ? { ...task, text, repeat, deadline } : task,
+        ),
       }));
     } else {
       const id = nextId;
-      setTasks(prev => ({ ...prev, [composer.qid]: orderTasksByDone([...prev[composer.qid], { id, text, done: false }]) }));
+      const newTask = { id, text, done: false, repeat, deadline };
+      const updatedTasks = {
+        ...tasksRef.current,
+        [composer.qid]: orderTasksByDone([...tasksRef.current[composer.qid], newTask]),
+      };
+      setTasks(updatedTasks);
       setNextId(id + 1);
+      // Immediately sync history so repeat propagation works when navigating away
+      const vdk = viewingDayKeyRef.current;
+      if (vdk && repeat) {
+        const nextHistory = upsertHistoryEntry(historyRef.current, vdk, updatedTasks);
+        historyRef.current = nextHistory;
+      }
     }
     closeComposer();
   };
+
+  const applyEditThisOnly = useCallback(() => {
+    if (!editConflict) return;
+    const { qid, taskId, text, newRepeat, newDeadline } = editConflict;
+    const newId = nextId;
+    setNextId(newId + 1);
+    setTasks((prev) => ({
+      ...prev,
+      [qid]: prev[qid].map((task) =>
+        task.id === taskId
+          ? { ...task, id: newId, text, repeat: newRepeat, deadline: newDeadline }
+          : task,
+      ),
+    }));
+    setEditConflict(null);
+    closeComposer();
+  }, [editConflict, nextId, closeComposer]);
+
+  const applyEditAll = useCallback(() => {
+    if (!editConflict) return;
+    const { qid, taskId, text, newRepeat, newDeadline } = editConflict;
+    const currentDayKey = viewingDayKeyRef.current || getLocalDayKey();
+
+    // Determine if the task should be removed from the current view:
+    // repeat+deadline task whose deadline is now before the current day.
+    const removedFromCurrent = newRepeat && newDeadline && newDeadline < currentDayKey;
+    setTasks((prev) => ({
+      ...prev,
+      [qid]: removedFromCurrent
+        ? prev[qid].filter((t) => t.id !== taskId)
+        : prev[qid].map((t) =>
+            t.id === taskId ? { ...t, text, repeat: newRepeat, deadline: newDeadline } : t,
+          ),
+    }));
+
+    const nextHistory = historyRef.current.map((entry) => {
+      const inEntry = QUADS.some((q) => (entry.tasks[q.id] || []).some((t) => t.id === taskId));
+      if (!inEntry) return entry;
+
+      const isFuture = entry.dayKey > currentDayKey;
+      // Remove from future entries when:
+      //  - repeat was turned off (future copies only existed via propagation), OR
+      //  - repeat+deadline but this entry is beyond the new deadline
+      const removeFromEntry =
+        isFuture && (!newRepeat || (newRepeat && newDeadline && entry.dayKey > newDeadline));
+
+      const updatedTasks = QUADS.reduce((acc, q) => {
+        if (removeFromEntry) {
+          acc[q.id] = (entry.tasks[q.id] || []).filter((t) => t.id !== taskId);
+        } else {
+          acc[q.id] = (entry.tasks[q.id] || []).map((t) =>
+            t.id === taskId ? { ...t, text, repeat: newRepeat, deadline: newDeadline } : t,
+          );
+        }
+        return acc;
+      }, { ...entry.tasks });
+
+      const total = QUADS.reduce((s, q) => s + updatedTasks[q.id].length, 0);
+      return { ...entry, tasks: updatedTasks, total };
+    });
+
+    historyRef.current = nextHistory;
+    setHistory(nextHistory);
+    AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(nextHistory)).catch(() => {});
+    setEditConflict(null);
+    closeComposer();
+  }, [editConflict, closeComposer]);
+
+  const moveTaskToDate = useCallback((targetDayKey) => {
+    if (!composer?.taskId) return;
+    const { taskId, qid } = composer;
+    const task = tasksRef.current[qid]?.find((t) => t.id === taskId);
+    if (!task) { setMovePickerOpen(false); closeComposer(); return; }
+
+    // Add task to target day's history entry
+    const targetEntry = historyRef.current.find((e) => e.dayKey === targetDayKey);
+    const targetTasks = targetEntry ? normalizeTasks(targetEntry.tasks) : createEmptyTasks();
+    if (!targetTasks[qid].some((t) => t.id === taskId)) {
+      targetTasks[qid] = [...targetTasks[qid], { ...task, done: false }];
+    }
+    const nextHistory = upsertHistoryEntry(historyRef.current, targetDayKey, targetTasks);
+    historyRef.current = nextHistory;
+    setHistory(nextHistory);
+
+    // Remove task from current day (persist useEffect will pick up the new historyRef)
+    setTasks((prev) => ({ ...prev, [qid]: prev[qid].filter((t) => t.id !== taskId) }));
+
+    // Persist immediately so the target day is saved before the debounced persist fires
+    AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(nextHistory)).catch(() => {});
+
+    setMovePickerOpen(false);
+    closeComposer();
+  }, [composer, closeComposer]);
 
   const handleComposerBackdropPress = () => {
     if (addVal.trim()) {
@@ -1194,7 +2093,13 @@ function EisenhowerApp() {
     const width = Math.max(132, Math.min(172, (rect.width || 430) / 2 - 28));
     return {
       width,
-      left: Math.max(12, Math.min(x - (rect.x || 0) - width / 2, (rect.width || 430) - width - 12)),
+      left: Math.max(
+        12,
+        Math.min(
+          x - (rect.x || 0) - width / 2,
+          (rect.width || 430) - width - 12,
+        ),
+      ),
       top: Math.max(10, y - (rect.y || 0) + 24),
     };
   };
@@ -1258,7 +2163,7 @@ function EisenhowerApp() {
     dragMoveFrame.current = requestAnimationFrame(flushPendingDragPoint);
   };
 
-  const endDrag = cancelled => {
+  const endDrag = (cancelled) => {
     if (dragMoveFrame.current) {
       cancelAnimationFrame(dragMoveFrame.current);
       dragMoveFrame.current = null;
@@ -1271,15 +2176,17 @@ function EisenhowerApp() {
 
     const current = draggingRef.current;
     if (!current) return;
-    const target = cancelled ? dropTargetRef.current : resolveDragTarget(current.x, current.y, true);
+    const target = cancelled
+      ? dropTargetRef.current
+      : resolveDragTarget(current.x, current.y, true);
     stopAutoScroll();
     draggingRef.current = null;
     dropTargetRef.current = null;
     lastGhostPoint.current = null;
 
-    if (!cancelled && target?.type === 'trash') {
+    if (!cancelled && target?.type === "trash") {
       deleteTask(current.from, current.task.id);
-    } else if (!cancelled && target?.type === 'quad') {
+    } else if (!cancelled && target?.type === "quad") {
       moveTask(current.from, current.task.id, target.qid, target.index);
     }
 
@@ -1292,15 +2199,13 @@ function EisenhowerApp() {
     setDropIndex(null);
   };
 
-  if (!fontsLoaded) {
-    return <View style={styles.loading} />;
-  }
-
-  const activeComposer = composer ? QUADS.find(q => q.id === composer.qid) : null;
+  const activeComposer = composer
+    ? QUADS.find((q) => q.id === composer.qid)
+    : null;
   const activeComposerColor = composer ? COLORS[composer.qid] : null;
-  const composerMode = composer?.taskId ? 'Edit task' : 'New task';
-  const displayHistory = upsertHistoryEntry(history, createHistoryEntry(activeDay, tasks));
-  const shellWidth = shellRect.current.width || Math.min(windowWidth || 430, 430);
+  const composerMode = composer?.taskId ? "Edit task" : "New task";
+  const shellWidth =
+    shellRect.current.width || Math.min(windowWidth || 430, 430);
   const dragGhostWidth = Math.max(132, Math.min(172, shellWidth / 2 - 28));
 
   const getDropMarkerTop = (qid, index) => {
@@ -1308,7 +2213,12 @@ function EisenhowerApp() {
 
     const layouts = taskLayouts.current[qid] || {};
     const scrollOffset = taskScrollOffsets.current[qid] || 0;
-    const { slots, totalHeight } = getVirtualDropSlots(tasks[qid] || [], qid, null, layouts);
+    const { slots, totalHeight } = getVirtualDropSlots(
+      tasks[qid] || [],
+      qid,
+      null,
+      layouts,
+    );
     const clampedIndex = constrainDropIndexByDone(slots, index, dragging?.task);
 
     if (slots.length === 0) return 0;
@@ -1324,111 +2234,200 @@ function EisenhowerApp() {
     return Math.max(0, slots[clampedIndex].top - scrollOffset);
   };
 
+  const topRowH = shellHeight > 0
+    ? (shellHeight + 16 + insets.top) / 2
+    : undefined;
+  const bottomRowH = shellHeight > 0
+    ? (shellHeight - 16 - insets.top) / 2
+    : undefined;
+
   return (
     <View style={styles.root}>
-      <StatusBar style={screen === 'history' ? 'dark' : 'light'} backgroundColor="transparent" translucent />
-      <View
+      <StatusBar style="light" backgroundColor="transparent" translucent />
+      <Animated.View
         ref={shellRef}
         collapsable={false}
         onLayout={handleShellLayout}
-        style={[styles.shell, shellHeight > 0 && { minHeight: shellHeight }]}
+        style={[styles.shell, shellHeight > 0 && { minHeight: shellHeight }, { opacity: matrixOpacityAnim }]}
       >
-        <GestureDetector gesture={openHistoryGesture}>
-          <View testID="matrix-gesture-layer" style={styles.safeLayer}>
-            <View style={styles.grid}>
-              {QUADS.map(q => (
-                <QuadrantTile
-                  key={q.id}
-                  q={q}
-                  color={COLORS[q.id]}
-                  tasks={tasks[q.id]}
-                  topInset={insets.top}
-                  dropMarkerTop={dropTarget === q.id ? getDropMarkerTop(q.id, dropIndex) : null}
-                  draggingTaskId={dragging?.task.id || null}
-                  draggingActive={!!dragging}
-                  setQuadRef={node => { quadRefs.current[q.id] = node; }}
-                  setTaskAreaRef={node => { taskAreaRefs.current[q.id] = node; }}
-                  setTaskListRef={node => { taskListRefs.current[q.id] = node; }}
-                  onMeasure={measureTargets}
-                  onTaskScroll={(qid, offset) => {
-                    taskScrollOffsets.current[qid] = offset;
-                  }}
-                  onTaskContentSize={(qid, height) => {
-                    taskContentHeights.current[qid] = height;
-                  }}
-                  onTaskLayout={(qid, taskId, event) => {
-                    const { y, height } = event.nativeEvent.layout;
-                    if (!taskLayouts.current[qid]) taskLayouts.current[qid] = {};
-                    taskLayouts.current[qid][taskId] = { y, height };
-                  }}
-                  onOpenComposer={openComposer}
-                  onToggleTask={toggleTask}
-                  onBeginDrag={beginDrag}
-                  onDragMove={updateDrag}
-                  onEndDrag={endDrag}
-                />
-              ))}
-            </View>
+        <LinearGradient
+          pointerEvents="none"
+          colors={["rgba(0,0,0,0.38)", "rgba(0,0,0,0.10)", "rgba(0,0,0,0)"]}
+          style={[styles.statusBarGradient, { height: insets.top + 28 }]}
+        />
 
-            <Animated.View
-              ref={trashRef}
-              collapsable={false}
+        {(() => {
+          const { label, dateStr } = formatPillParts(viewingDayKey);
+          const pillText = (
+            <Text numberOfLines={1} style={styles.datePillText}>
+              {label ? <Text style={styles.datePillTodayLabel}>{label}</Text> : null}
+              {label ? <Text style={styles.datePillSep}>{" · "}</Text> : null}
+              {dateStr}
+            </Text>
+          );
+          return viewingDayKey ? (
+            <Pressable
+              onPress={goToToday}
+              style={[styles.datePillContainer, { top: insets.top + 5 }]}
+            >
+              {pillText}
+            </Pressable>
+          ) : (
+            <View
               pointerEvents="none"
+              style={[styles.datePillContainer, { top: insets.top + 5 }]}
+            >
+              {pillText}
+            </View>
+          );
+        })()}
+
+        <Pressable
+          onPress={() => setSortByDeadline((s) => !s)}
+          style={({ pressed }) => [styles.sortBtn, { top: insets.top + 4 }, pressed && styles.pressed]}
+          hitSlop={8}
+        >
+          <Text style={[
+            styles.sortBtnText,
+            { color: sortByDeadline ? INK : "rgba(22,22,22,0.36)" },
+          ]}>
+            {"⇅"}
+          </Text>
+        </Pressable>
+
+        <View testID="matrix-gesture-layer" style={styles.safeLayer} {...edgePanResponder.panHandlers}>
+          <View style={styles.grid}>
+            {[QUADS.slice(0, 2), QUADS.slice(2, 4)].map((row, rowIdx) => (
+              <View
+                key={rowIdx}
+                style={[
+                  styles.gridRow,
+                  rowIdx === 0 && topRowH !== undefined && { height: topRowH },
+                  rowIdx === 1 && bottomRowH !== undefined && { height: bottomRowH },
+                ]}
+              >
+                {row.map((q) => {
+                  const qTasks = sortByDeadline
+                    ? [...tasks[q.id]].sort((a, b) => {
+                        if (a.done !== b.done) return a.done ? 1 : -1;
+                        if (!a.deadline && !b.deadline) return 0;
+                        if (!a.deadline) return 1;
+                        if (!b.deadline) return -1;
+                        return a.deadline.localeCompare(b.deadline);
+                      })
+                    : tasks[q.id];
+                  return (
+                  <QuadrantTile
+                    key={q.id}
+                    q={q}
+                    color={COLORS[q.id]}
+                    tasks={qTasks}
+                    topInset={insets.top}
+                    dropMarkerTop={
+                      dropTarget === q.id ? getDropMarkerTop(q.id, dropIndex) : null
+                    }
+                    draggingTaskId={dragging?.task.id || null}
+                    draggingActive={!!dragging}
+                    setQuadRef={(node) => {
+                      quadRefs.current[q.id] = node;
+                    }}
+                    setTaskAreaRef={(node) => {
+                      taskAreaRefs.current[q.id] = node;
+                    }}
+                    setTaskListRef={(node) => {
+                      taskListRefs.current[q.id] = node;
+                    }}
+                    onMeasure={measureTargets}
+                    onTaskScroll={(qid, offset) => {
+                      taskScrollOffsets.current[qid] = offset;
+                    }}
+                    onTaskContentSize={(qid, height) => {
+                      taskContentHeights.current[qid] = height;
+                    }}
+                    onTaskLayout={(qid, taskId, event) => {
+                      const { y, height } = event.nativeEvent.layout;
+                      if (!taskLayouts.current[qid]) taskLayouts.current[qid] = {};
+                      taskLayouts.current[qid][taskId] = { y, height };
+                    }}
+                    onOpenComposer={openComposer}
+                    onToggleTask={toggleTask}
+                    onBeginDrag={beginDrag}
+                    onDragMove={updateDrag}
+                    onEndDrag={endDrag}
+                  />
+                  );
+                })}
+              </View>
+            ))}
+          </View>
+
+          <Animated.View
+            ref={trashRef}
+            collapsable={false}
+            pointerEvents="none"
+            style={[
+              styles.deleteTarget,
+              {
+                opacity: trashAnim,
+                height: DELETE_TARGET_HEIGHT + insets.bottom,
+                transform: [
+                  {
+                    translateY: trashAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [DELETE_TARGET_HEIGHT + insets.bottom, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
+            <Animated.View
               style={[
-                styles.deleteTarget,
+                styles.trashDrop,
                 {
-                  opacity: trashAnim,
-                  height: DELETE_TARGET_HEIGHT + insets.bottom,
-                  transform: [{ translateY: trashAnim.interpolate({ inputRange: [0, 1], outputRange: [DELETE_TARGET_HEIGHT + insets.bottom, 0] }) }],
+                  transform: [
+                    {
+                      scaleY: deleteHotAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [1, 1.08],
+                      }),
+                    },
+                  ],
                 },
               ]}
             >
               <Animated.View
-                style={[
-                  styles.trashDrop,
-                  {
-                    transform: [{ scaleY: deleteHotAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] }) }],
-                  },
-                ]}
-              >
-                <Animated.View style={[styles.trashDropHot, { opacity: deleteHotAnim }]} />
-              </Animated.View>
-            </Animated.View>
-
-            {lastDeleted && !dragging && (
-              <Animated.View
-                accessibilityRole="alert"
-                style={[
-                  styles.undo,
-                  {
-                    bottom: 14 + insets.bottom,
-                    opacity: undoAnim,
-                    transform: [{ translateY: undoAnim.interpolate({ inputRange: [0, 1], outputRange: [18, 0] }) }],
-                  },
-                ]}
-              >
-                <Text style={styles.undoText}>Task deleted</Text>
-                <Pressable onPress={undoDelete} style={styles.undoButton}>
-                  <Text style={styles.undoButtonText}>Undo</Text>
-                </Pressable>
-              </Animated.View>
-            )}
-
-          </View>
-        </GestureDetector>
-
-        {screen === 'history' && (
-          <GestureDetector gesture={closeHistoryGesture}>
-            <Reanimated.View testID="history-slide" style={[styles.historySlide, historyScreenStyle]}>
-              <HistoryScreen
-                history={displayHistory}
-                tasks={tasks}
-                activeDay={activeDay}
-                onSelectDay={selectHistoryDay}
+                style={[styles.trashDropHot, { opacity: deleteHotAnim }]}
               />
-            </Reanimated.View>
-          </GestureDetector>
-        )}
+            </Animated.View>
+          </Animated.View>
+
+          {lastDeleted && !dragging && (
+            <Animated.View
+              accessibilityRole="alert"
+              style={[
+                styles.undo,
+                {
+                  bottom: 14 + insets.bottom,
+                  opacity: undoAnim,
+                  transform: [
+                    {
+                      translateY: undoAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [18, 0],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            >
+              <Text style={styles.undoText}>Task deleted</Text>
+              <Pressable onPress={undoDelete} style={({ pressed }) => [styles.undoButton, pressed && styles.pressed]}>
+                <Text style={styles.undoButtonText}>Undo</Text>
+              </Pressable>
+            </Animated.View>
+          )}
+        </View>
 
         {dragging && (
           <Animated.View
@@ -1444,25 +2443,48 @@ function EisenhowerApp() {
                 transform: [
                   { translateX: dragXAnim },
                   { translateY: dragYAnim },
-                  { scale: dragAnim.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) },
+                  {
+                    scale: dragAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.96, 1],
+                    }),
+                  },
                 ],
-                borderColor: 'rgba(22,22,22,0.08)',
+                borderColor: "rgba(22,22,22,0.08)",
               },
             ]}
           >
-            <Text style={[styles.dragGhostText, { color: COLORS[dragging.from].fg }]} numberOfLines={2} ellipsizeMode="tail">{dragging.task.text}</Text>
+            <Text
+              style={[
+                styles.dragGhostText,
+                { color: COLORS[dragging.from].fg },
+              ]}
+              numberOfLines={2}
+              ellipsizeMode="tail"
+            >
+              {dragging.task.text}
+            </Text>
           </Animated.View>
         )}
 
         {composer && activeComposer && (
-          <SafeAreaView testID="task-composer" style={styles.composerSafe} edges={['top', 'right', 'left']}>
+          <SafeAreaView
+            testID="task-composer"
+            style={styles.composerSafe}
+            edges={["top", "right", "left"]}
+          >
             <AnimatedPressable
               accessibilityLabel="Close task editor"
               testID="task-composer-backdrop"
               onPress={handleComposerBackdropPress}
               style={[
                 styles.composerBackdrop,
-                { opacity: composerAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 1] }) },
+                {
+                  opacity: composerAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0, 1],
+                  }),
+                },
               ]}
             />
             <KeyboardStickyView
@@ -1476,14 +2498,35 @@ function EisenhowerApp() {
                   styles.composerPanel,
                   {
                     opacity: composerAnim,
-                    transform: [{ translateY: composerAnim.interpolate({ inputRange: [0, 1], outputRange: [22, 0] }) }],
+                    transform: [
+                      {
+                        translateY: composerAnim.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [22, 0],
+                        }),
+                      },
+                    ],
                   },
                   composerPanelBg(composer.qid),
                   composerBorder(composer.qid),
                 ]}
               >
-                <Text style={[styles.composerTitle, { color: activeComposerColor.fg }]}>{composerMode}</Text>
-                <Text style={[styles.composerDesc, { color: activeComposerColor.muted }]}>{activeComposer.desc}</Text>
+                <Text
+                  style={[
+                    styles.composerLabel,
+                    { color: activeComposerColor.muted },
+                  ]}
+                >
+                  {activeComposer.title.toUpperCase()}
+                </Text>
+                <Text
+                  style={[
+                    styles.composerTitle,
+                    { color: activeComposerColor.fg },
+                  ]}
+                >
+                  {composerMode}
+                </Text>
                 <View style={styles.composerRow}>
                   <TextInput
                     accessibilityLabel="Task name"
@@ -1492,14 +2535,108 @@ function EisenhowerApp() {
                     onChangeText={setAddVal}
                     onSubmitEditing={saveComposer}
                     placeholder="Task name..."
-                    placeholderTextColor={composer.qid === 'q1' ? 'rgba(255,255,255,0.38)' : 'rgba(22,22,22,0.42)'}
+                    placeholderTextColor={
+                      composer.qid === "q1"
+                        ? "rgba(255,255,255,0.35)"
+                        : "rgba(22,22,22,0.38)"
+                    }
                     returnKeyType="done"
-                    style={[styles.addInput, addInputBg(composer.qid), { color: activeComposerColor.fg }]}
+                    style={[
+                      styles.addInput,
+                      addInputBg(composer.qid),
+                      { color: activeComposerColor.fg },
+                    ]}
                     autoFocus
                   />
+                  <View style={styles.composerChipsRow}>
+                    <Pressable
+                      onPress={() => setRepeat((r) => !r)}
+                      style={({ pressed }) => [
+                        styles.composerChip,
+                        composerChipStyle(composer.qid, repeat),
+                        pressed && { opacity: 0.72 },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.composerChipText,
+                          {
+                            color: repeat
+                              ? activeComposerColor.fg
+                              : activeComposerColor.muted,
+                          },
+                        ]}
+                      >
+                        {"↺  Repeat"}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => setDeadlinePickerOpen((o) => !o)}
+                      style={({ pressed }) => [
+                        styles.composerChip,
+                        composerChipStyle(composer.qid, !!deadline),
+                        pressed && { opacity: 0.72 },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.composerChipText,
+                          {
+                            color: deadline
+                              ? activeComposerColor.fg
+                              : activeComposerColor.muted,
+                          },
+                        ]}
+                      >
+                        {deadline
+                          ? `Due: ${formatDeadlineShort(deadline)}`
+                          : "Deadline"}
+                      </Text>
+                    </Pressable>
+                    {composer.taskId && !repeat && (
+                      <Pressable
+                        onPress={() => { setMovePickerOpen((o) => !o); setDeadlinePickerOpen(false); }}
+                        style={({ pressed }) => [
+                          styles.composerChip,
+                          composerChipStyle(composer.qid, movePickerOpen),
+                          pressed && { opacity: 0.72 },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.composerChipText,
+                            { color: movePickerOpen ? activeComposerColor.fg : activeComposerColor.muted },
+                          ]}
+                        >
+                          {"Move to…"}
+                        </Text>
+                      </Pressable>
+                    )}
+                  </View>
+                  {deadlinePickerOpen && (
+                    <DeadlinePicker
+                      value={deadline}
+                      quadId={composer.qid}
+                      onChange={(d) => { setDeadline(d); }}
+                      onClose={() => setDeadlinePickerOpen(false)}
+                      minDate={viewingDayKey || undefined}
+                    />
+                  )}
+                  {movePickerOpen && composer.taskId && !repeat && (
+                    <DeadlinePicker
+                      value={null}
+                      quadId={composer.qid}
+                      onChange={(d) => { if (d) moveTaskToDate(d); }}
+                      onClose={() => setMovePickerOpen(false)}
+                      minDate={null}
+                      maxDate={deadline || undefined}
+                    />
+                  )}
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel={composer.taskId ? 'Save task' : 'Add task'}
+                    accessibilityLabel={
+                      composer.taskId ? "Save task" : "Add task"
+                    }
                     testID="task-composer-save"
                     disabled={!addVal.trim()}
                     onPress={saveComposer}
@@ -1510,14 +2647,323 @@ function EisenhowerApp() {
                       !addVal.trim() && styles.addButtonDisabled,
                     ]}
                   >
-                    <Text style={styles.addButtonText}>Save</Text>
+                    <Text
+                      style={[
+                        styles.addButtonText,
+                        { color: composer.qid === "q1" ? INK : "#fff" },
+                      ]}
+                    >
+                      Save
+                    </Text>
                   </Pressable>
                 </View>
               </Animated.View>
             </KeyboardStickyView>
           </SafeAreaView>
         )}
-      </View>
+
+        {archiveOpen && (
+          <>
+            <AnimatedPressable
+              style={[styles.archiveBackdrop, { opacity: archiveAnim }]}
+              onPress={() => closeArchive()}
+            />
+            <Animated.View
+              style={[
+                styles.archivePanel,
+                {
+                  transform: [
+                    {
+                      translateX: archiveAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [windowWidth * 0.82, 0],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+              {...archiveSwipePanResponder.panHandlers}
+            >
+              <SafeAreaView
+                edges={["top", "right"]}
+                style={styles.archivePanelInner}
+              >
+                {/* ── LIST ── */}
+                {archiveScreen === "list" && (() => {
+                  const filtered = history.filter((e) => e.total > 0);
+                  return (
+                    <>
+                      <View style={styles.archivePanelHeaderRow}>
+                        <Text style={styles.archiveHeading}>Archive</Text>
+                        <Pressable
+                          onPress={handleArchiveAddDate}
+                          style={({ pressed }) => [styles.archiveAddBtn, pressed && styles.pressed]}
+                          hitSlop={10}
+                        >
+                          <Ionicons name="add" size={22} color="rgba(255,255,255,0.55)" />
+                        </Pressable>
+                      </View>
+                      {filtered.length === 0 ? (
+                        <Text style={styles.archiveEmpty}>No archive yet</Text>
+                      ) : (
+                        <FlatList
+                          data={filtered}
+                          keyExtractor={(item) => item.dayKey}
+                          renderItem={({ item, index }) => (
+                            <ArchiveListItem
+                              item={item}
+                              index={index}
+                              onPress={() => loadDayToMainScreen(item.dayKey)}
+                              onDelete={() => deleteHistoryEntry(item.dayKey)}
+                              onSwipeOpen={(closeFn) => {
+                                openArchiveItemRef.current?.();
+                                openArchiveItemRef.current = closeFn;
+                              }}
+                            />
+                          )}
+                          showsVerticalScrollIndicator={false}
+                          contentContainerStyle={styles.archiveList}
+                        />
+                      )}
+                    </>
+                  );
+                })()}
+
+                {/* ── CALENDAR ── */}
+                {archiveScreen === "calendar" && (
+                  <Animated.View
+                    style={[
+                      { flex: 1 },
+                      {
+                        opacity: archiveCalAnim,
+                        transform: [
+                          {
+                            translateX: archiveCalAnim.interpolate({
+                              inputRange: [0, 1],
+                              outputRange: [48, 0],
+                            }),
+                          },
+                        ],
+                      },
+                    ]}
+                  >
+                    <ArchiveCalendar
+                      historyDayKeys={history
+                        .filter((e) => e.total > 0)
+                        .map((e) => e.dayKey)}
+                      onSelect={handleCalendarSelect}
+                      onBack={handleCalendarBack}
+                    />
+                  </Animated.View>
+                )}
+              </SafeAreaView>
+            </Animated.View>
+          </>
+        )}
+
+        {editConflict && (
+          <>
+            <Pressable
+              style={styles.editConflictBackdrop}
+              onPress={() => { setEditConflict(null); closeComposer(); }}
+            />
+            <KeyboardStickyView
+              pointerEvents="box-none"
+              offset={{ closed: 0, opened: 0 }}
+              style={styles.editConflictKeyboard}
+            >
+            <Animated.View
+              style={[
+                styles.editConflictCard,
+                composerPanelBg(editConflict.qid),
+                composerBorder(editConflict.qid),
+                {
+                  opacity: conflictAnim,
+                  transform: [
+                    {
+                      translateY: conflictAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [24, 0],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            >
+              <Text style={[styles.editConflictTitle, { color: COLORS[editConflict.qid].fg }]}>
+                Edit recurring task
+              </Text>
+              <Text style={[styles.editConflictSub, { color: COLORS[editConflict.qid].muted }]}>
+                This task repeats or has a deadline. What would you like to change?
+              </Text>
+              <Pressable
+                onPress={applyEditThisOnly}
+                style={({ pressed }) => [styles.editConflictOption, pressed && styles.pressed]}
+              >
+                <View
+                  style={[
+                    styles.editConflictOptionInner,
+                    {
+                      borderColor:
+                        editConflict.qid === "q1"
+                          ? "rgba(255,255,255,0.14)"
+                          : "rgba(22,22,22,0.12)",
+                    },
+                  ]}
+                >
+                  <Text style={[styles.editConflictOptionLabel, { color: COLORS[editConflict.qid].fg }]}>
+                    Only this task
+                  </Text>
+                  <Text style={[styles.editConflictOptionSub, { color: COLORS[editConflict.qid].muted }]}>
+                    Changes apply to this occurrence only
+                  </Text>
+                </View>
+              </Pressable>
+              <Pressable
+                onPress={applyEditAll}
+                style={({ pressed }) => [styles.editConflictOption, pressed && styles.pressed]}
+              >
+                <View
+                  style={[
+                    styles.editConflictOptionInner,
+                    {
+                      borderColor:
+                        editConflict.qid === "q1"
+                          ? "rgba(255,255,255,0.14)"
+                          : "rgba(22,22,22,0.12)",
+                    },
+                  ]}
+                >
+                  <Text style={[styles.editConflictOptionLabel, { color: COLORS[editConflict.qid].fg }]}>
+                    All tasks
+                  </Text>
+                  <Text style={[styles.editConflictOptionSub, { color: COLORS[editConflict.qid].muted }]}>
+                    Update this and all related tasks in history
+                  </Text>
+                </View>
+              </Pressable>
+              <Pressable
+                onPress={() => { setEditConflict(null); closeComposer(); }}
+                style={({ pressed }) => [styles.editConflictCancel, pressed && styles.pressed]}
+              >
+                <Text style={[styles.editConflictCancelText, { color: COLORS[editConflict.qid].muted }]}>
+                  Cancel
+                </Text>
+              </Pressable>
+            </Animated.View>
+            </KeyboardStickyView>
+          </>
+        )}
+
+        {deleteConflict && (
+          <>
+            <Pressable
+              style={styles.editConflictBackdrop}
+              onPress={() => setDeleteConflict(null)}
+            />
+            <KeyboardStickyView
+              pointerEvents="box-none"
+              offset={{ closed: 0, opened: 0 }}
+              style={styles.editConflictKeyboard}
+            >
+            <Animated.View
+              style={[
+                styles.editConflictCard,
+                composerPanelBg(deleteConflict.qid),
+                composerBorder(deleteConflict.qid),
+                {
+                  opacity: deleteConflictAnim,
+                  transform: [{ translateY: deleteConflictAnim.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) }],
+                },
+              ]}
+            >
+              <Text style={[styles.editConflictTitle, { color: COLORS[deleteConflict.qid].fg }]}>
+                Delete task
+              </Text>
+              <Text style={[styles.editConflictSub, { color: COLORS[deleteConflict.qid].muted }]}>
+                This task appears on multiple days. How would you like to delete it?
+              </Text>
+              <Pressable
+                onPress={confirmDeleteThisOnly}
+                style={({ pressed }) => [styles.editConflictOption, pressed && styles.pressed]}
+              >
+                <View style={[styles.editConflictOptionInner, { borderColor: deleteConflict.qid === "q1" ? "rgba(255,255,255,0.14)" : "rgba(22,22,22,0.12)" }]}>
+                  <Text style={[styles.editConflictOptionLabel, { color: COLORS[deleteConflict.qid].fg }]}>
+                    Only this day
+                  </Text>
+                  <Text style={[styles.editConflictOptionSub, { color: COLORS[deleteConflict.qid].muted }]}>
+                    Remove from this day only, keep all other days
+                  </Text>
+                </View>
+              </Pressable>
+              <Pressable
+                onPress={confirmDeleteFromHere}
+                style={({ pressed }) => [styles.editConflictOption, pressed && styles.pressed]}
+              >
+                <View style={[styles.editConflictOptionInner, { borderColor: deleteConflict.qid === "q1" ? "rgba(255,255,255,0.14)" : "rgba(22,22,22,0.12)" }]}>
+                  <Text style={[styles.editConflictOptionLabel, { color: COLORS[deleteConflict.qid].fg }]}>
+                    This day and forward
+                  </Text>
+                  <Text style={[styles.editConflictOptionSub, { color: COLORS[deleteConflict.qid].muted }]}>
+                    Remove from this day and all future days
+                  </Text>
+                </View>
+              </Pressable>
+              <Pressable
+                onPress={confirmDeleteAll}
+                style={({ pressed }) => [styles.editConflictOption, pressed && styles.pressed]}
+              >
+                <View style={[styles.editConflictOptionInner, { borderColor: deleteConflict.qid === "q1" ? "rgba(255,255,255,0.14)" : "rgba(22,22,22,0.12)" }]}>
+                  <Text style={[styles.editConflictOptionLabel, { color: COLORS[deleteConflict.qid].fg }]}>
+                    Delete everywhere
+                  </Text>
+                  <Text style={[styles.editConflictOptionSub, { color: COLORS[deleteConflict.qid].muted }]}>
+                    Remove from all days including past
+                  </Text>
+                </View>
+              </Pressable>
+              <Pressable
+                onPress={() => setDeleteConflict(null)}
+                style={({ pressed }) => [styles.editConflictCancel, pressed && styles.pressed]}
+              >
+                <Text style={[styles.editConflictCancelText, { color: COLORS[deleteConflict.qid].muted }]}>
+                  Cancel
+                </Text>
+              </Pressable>
+            </Animated.View>
+            </KeyboardStickyView>
+          </>
+        )}
+
+      </Animated.View>
+
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          StyleSheet.absoluteFillObject,
+          styles.splashOverlay,
+          { opacity: splashOpacityAnim },
+        ]}
+      >
+        {(() => {
+          const splashSize = Math.min(windowWidth || 390, windowHeight || 844) * SPLASH_GRID_RATIO;
+          const splashRadius = splashSize * SPLASH_RADIUS_RATIO;
+          return (
+            <Animated.View style={{ transform: [{ scale: splashScaleAnim }] }}>
+              <View style={[styles.splashLogo, { width: splashSize, height: splashSize, borderRadius: splashRadius }]}>
+                <View style={styles.splashRow}>
+                  <View style={[styles.splashCell, { backgroundColor: COLORS.q1.bg }]} />
+                  <View style={[styles.splashCell, { backgroundColor: COLORS.q2.bg }]} />
+                </View>
+                <View style={styles.splashRow}>
+                  <View style={[styles.splashCell, { backgroundColor: COLORS.q3.bg }]} />
+                  <View style={[styles.splashCell, { backgroundColor: COLORS.q4.bg }]} />
+                </View>
+              </View>
+            </Animated.View>
+          );
+        })()}
+      </Animated.View>
     </View>
   );
 }
@@ -1539,28 +2985,40 @@ function composerPanelBg(quadId) {
 }
 
 function composerBorder(quadId) {
-  if (quadId === 'q1') return { borderColor: 'rgba(255,255,255,0.16)' };
-  return { borderColor: 'rgba(22,22,22,0.08)' };
+  if (quadId === "q1") return { borderColor: "rgba(255,255,255,0.16)" };
+  return { borderColor: "rgba(22,22,22,0.08)" };
 }
 
 function addInputBg(quadId) {
-  if (quadId === 'q1') return { backgroundColor: 'rgba(255,255,255,0.1)' };
-  return { backgroundColor: 'rgba(22,22,22,0.06)' };
+  if (quadId === "q1") return { backgroundColor: "rgba(255,255,255,0.1)" };
+  return { backgroundColor: "rgba(22,22,22,0.06)" };
 }
 
 function addButtonBg(quadId) {
-  if (quadId === 'q1') return { backgroundColor: 'rgba(255,255,255,0.16)' };
+  if (quadId === "q1") return { backgroundColor: "rgba(255,255,255,0.92)" };
   return { backgroundColor: INK };
+}
+
+function composerChipStyle(quadId, isActive) {
+  if (isActive) {
+    return quadId === "q1"
+      ? { backgroundColor: "rgba(255,255,255,0.18)", borderWidth: 1, borderColor: "transparent" }
+      : { backgroundColor: "rgba(22,22,22,0.12)", borderWidth: 1, borderColor: "transparent" };
+  }
+  return quadId === "q1"
+    ? { borderWidth: 1, borderColor: "rgba(255,255,255,0.22)" }
+    : { borderWidth: 1, borderColor: "rgba(22,22,22,0.16)" };
 }
 
 const styles = StyleSheet.create({
   appRoot: {
     flex: 1,
+    backgroundColor: APP_SURFACE,
   },
   root: {
     flex: 1,
     backgroundColor: INK,
-    alignItems: 'center',
+    alignItems: "center",
   },
   loading: {
     flex: 1,
@@ -1568,25 +3026,27 @@ const styles = StyleSheet.create({
   },
   shell: {
     flex: 1,
-    width: '100%',
+    width: "100%",
     maxWidth: 430,
     backgroundColor: APP_SURFACE,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
   safeLayer: {
     flex: 1,
-    position: 'relative',
+    position: "relative",
   },
   grid: {
     flex: 1,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "column",
     backgroundColor: APP_SURFACE,
   },
+  gridRow: {
+    flex: 1,
+    flexDirection: "row",
+  },
   tile: {
-    width: '50%',
-    height: '50%',
-    overflow: 'hidden',
+    width: "50%",
+    overflow: "hidden",
     borderWidth: 0,
   },
   dropOverlay: {
@@ -1594,7 +3054,7 @@ const styles = StyleSheet.create({
     zIndex: 3,
   },
   dropOverlayLine: {
-    position: 'absolute',
+    position: "absolute",
     borderColor: INK,
     backgroundColor: INK,
   },
@@ -1623,11 +3083,11 @@ const styles = StyleSheet.create({
     width: 2,
   },
   dropInsertMarkerFloating: {
-    position: 'absolute',
+    position: "absolute",
     left: 10,
     right: 10,
     height: 10,
-    justifyContent: 'center',
+    justifyContent: "center",
     zIndex: 4,
   },
   dropInsertLine: {
@@ -1645,9 +3105,9 @@ const styles = StyleSheet.create({
   },
   tileHeadTop: {
     minHeight: 40,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
     gap: 6,
   },
   tileTitle: {
@@ -1671,12 +3131,12 @@ const styles = StyleSheet.create({
   },
   miniTask: {
     minHeight: 44,
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
   },
   miniTaskDivider: {
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(128,128,128,0.16)',
+    borderBottomColor: "rgba(128,128,128,0.16)",
   },
   miniTaskRoomy: {
     paddingVertical: 4,
@@ -1687,36 +3147,35 @@ const styles = StyleSheet.create({
   checkHit: {
     width: 44,
     height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   checkCircle: {
     width: 16,
     height: 16,
     borderRadius: 3,
     borderWidth: 1.4,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   miniText: {
-    width: '100%',
-    paddingRight: 7,
+    flex: 1,
     ...TYPE.task,
-    textAlignVertical: 'center',
+    textAlignVertical: "center",
   },
   miniDragArea: {
     flex: 1,
     minHeight: 44,
-    justifyContent: 'center',
+    justifyContent: "center",
   },
   miniDragAreaRoomy: {
     paddingVertical: 2,
   },
   doneText: {
-    textDecorationLine: 'line-through',
+    textDecorationLine: "line-through",
   },
   tileEmpty: {
-    display: 'none',
+    display: "none",
   },
   emptyAddFooter: {
     flexGrow: 1,
@@ -1726,25 +3185,25 @@ const styles = StyleSheet.create({
     minHeight: 78,
   },
   deleteTarget: {
-    position: 'absolute',
+    position: "absolute",
     left: 0,
     right: 0,
     bottom: 0,
-    justifyContent: 'flex-end',
+    justifyContent: "flex-end",
     zIndex: 20,
   },
   trashDrop: {
-    width: '100%',
+    width: "100%",
     height: DELETE_BAR_HEIGHT,
     backgroundColor: DANGER_SOFT,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
   trashDropHot: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: DANGER,
   },
   dragGhost: {
-    position: 'absolute',
+    position: "absolute",
     zIndex: 25,
     width: 240,
     minHeight: 44,
@@ -1762,7 +3221,7 @@ const styles = StyleSheet.create({
     ...TYPE.dragLabel,
   },
   undo: {
-    position: 'absolute',
+    position: "absolute",
     left: 16,
     right: 16,
     bottom: 14,
@@ -1771,145 +3230,26 @@ const styles = StyleSheet.create({
     backgroundColor: INK,
     paddingLeft: 15,
     paddingRight: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     zIndex: 30,
   },
   undoText: {
-    color: '#fff',
+    color: "#fff",
     ...TYPE.button,
   },
   undoButton: {
     minHeight: 44,
     paddingHorizontal: 14,
     borderRadius: 10,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
   },
   undoButtonText: {
     color: INK,
     ...TYPE.button,
-  },
-  historySlide: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 34,
-    elevation: 8,
-  },
-  historyScreen: {
-    flex: 1,
-    backgroundColor: APP_SURFACE,
-  },
-  historyHeader: {
-    minHeight: 88,
-    paddingHorizontal: 14,
-    paddingTop: 14,
-    paddingBottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(22,22,22,0.08)',
-  },
-  historyHeaderText: {
-    flex: 1,
-  },
-  historyTitle: {
-    color: INK,
-    ...TYPE.screenTitle,
-  },
-  historySubtitle: {
-    marginTop: 1,
-    color: 'rgba(22,22,22,0.52)',
-    ...TYPE.screenSubtitle,
-  },
-  historyPressed: {
-    opacity: 0.68,
-  },
-  calendarShell: {
-    flex: 1,
-    paddingHorizontal: 14,
-    paddingTop: 14,
-    paddingBottom: 24,
-  },
-  calendarMonthBar: {
-    minHeight: 52,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  calendarMonthButton: {
-    width: 46,
-    height: 46,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  calendarMonthButtonDisabled: {
-    opacity: 0.24,
-  },
-  calendarMonthTitle: {
-    flex: 1,
-    color: INK,
-    ...TYPE.rowTitle,
-    textAlign: 'center',
-  },
-  calendarWeekRow: {
-    marginTop: 12,
-    flexDirection: 'row',
-  },
-  calendarWeekLabel: {
-    width: `${100 / 7}%`,
-    color: 'rgba(22,22,22,0.48)',
-    ...TYPE.sectionLabel,
-    textAlign: 'center',
-  },
-  calendarGrid: {
-    marginTop: 8,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  calendarDay: {
-    width: `${100 / 7}%`,
-    minHeight: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 8,
-    marginVertical: 3,
-  },
-  calendarDayActive: {
-    backgroundColor: INK,
-  },
-  calendarDayToday: {
-    borderWidth: 1,
-    borderColor: DROP_GUIDE,
-  },
-  calendarDayMuted: {
-    opacity: 0.34,
-  },
-  calendarDayDisabled: {
-    opacity: 0.22,
-  },
-  calendarDayText: {
-    color: INK,
-    ...TYPE.rowMeta,
-  },
-  calendarDayTextActive: {
-    color: '#FFFFFF',
-  },
-  calendarDayTextMuted: {
-    color: 'rgba(22,22,22,0.44)',
-  },
-  calendarTaskDot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    marginTop: 3,
-    backgroundColor: INK,
-  },
-  calendarTaskDotActive: {
-    backgroundColor: '#FFFFFF',
   },
   composerSafe: {
     ...StyleSheet.absoluteFillObject,
@@ -1917,58 +3257,496 @@ const styles = StyleSheet.create({
   },
   composerBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(22,22,22,0.10)',
+    backgroundColor: "rgba(22,22,22,0.10)",
   },
   composerKeyboard: {
     ...StyleSheet.absoluteFillObject,
-    justifyContent: 'flex-end',
+    justifyContent: "flex-end",
   },
   composerPanel: {
     marginHorizontal: 10,
     marginBottom: COMPOSER_BOTTOM_GAP,
-    borderRadius: 18,
+    borderRadius: 20,
     borderWidth: 1,
-    padding: 14,
-    width: 'auto',
+    padding: 16,
+    width: "auto",
     shadowColor: INK,
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 5,
+    shadowOpacity: 0.14,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 7,
+  },
+  composerLabel: {
+    ...TYPE.tileMeta,
+    letterSpacing: 0.6,
+    marginBottom: 2,
   },
   composerTitle: {
-    ...TYPE.composerTitle,
-  },
-  composerDesc: {
-    ...TYPE.composerMeta,
-    marginTop: 1,
-    marginBottom: 10,
+    fontFamily: "Nunito_800ExtraBold",
+    fontSize: 18,
+    lineHeight: 23,
+    marginBottom: 12,
   },
   composerRow: {
-    flexDirection: 'column',
-    alignItems: 'stretch',
-    gap: 9,
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: 10,
   },
   addInput: {
-    width: '100%',
-    minHeight: 44,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    ...TYPE.input,
+    width: "100%",
+    minHeight: 48,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    fontFamily: "Nunito_600SemiBold",
+    fontSize: 15,
+    lineHeight: 19,
+  },
+  composerChipsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  composerChip: {
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  composerChipText: {
+    fontFamily: "Nunito_700Bold",
+    fontSize: 11,
+    lineHeight: 15,
   },
   addButton: {
-    width: '100%',
-    height: 44,
-    borderRadius: 10,
+    width: "100%",
+    height: 48,
+    borderRadius: 12,
     paddingHorizontal: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   addButtonDisabled: {
-    opacity: 0.32,
+    opacity: 0.3,
   },
   addButtonText: {
-    color: '#fff',
-    ...TYPE.button,
+    fontFamily: "Nunito_900Black",
+    fontSize: 13,
+    lineHeight: 17,
+  },
+  archiveBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.46)",
+    zIndex: 40,
+  },
+  archivePanel: {
+    position: "absolute",
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: "82%",
+    backgroundColor: "#0E0E0E",
+    zIndex: 50,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderLeftColor: "rgba(255,255,255,0.08)",
+    shadowColor: "#000",
+    shadowOpacity: 0.4,
+    shadowRadius: 20,
+    shadowOffset: { width: -4, height: 0 },
+  },
+  archivePanelInner: {
+    flex: 1,
+  },
+  archiveHeading: {
+    color: "#FFFFFF",
+    ...TYPE.screenTitle,
+  },
+  archiveEmpty: {
+    color: "rgba(255,255,255,0.28)",
+    ...TYPE.rowMeta,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+  },
+  archiveList: {
+    paddingBottom: 32,
+  },
+  archiveEntryFirst: {},
+  archiveEntry: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 13,
+    marginHorizontal: 10,
+    borderRadius: 12,
+  },
+  archiveEntryPressed: {
+    backgroundColor: "rgba(255,255,255,0.07)",
+  },
+  archiveEntryLeft: {
+    flex: 1,
+  },
+  archiveEntryDate: {
+    color: "#FFFFFF",
+    fontFamily: "Nunito_700Bold",
+    fontSize: 14,
+    lineHeight: 18,
+  },
+  archiveEntryDateMuted: {
+    color: "rgba(255,255,255,0.36)",
+  },
+  archiveEntryCount: {
+    color: "rgba(255,255,255,0.38)",
+    ...TYPE.rowMeta,
+    marginTop: 2,
+  },
+
+  // status bar gradient
+  statusBarGradient: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 8,
+  },
+
+  // sort button
+  sortBtn: {
+    position: "absolute",
+    right: 14,
+    zIndex: 10,
+    padding: 4,
+  },
+  sortBtnText: {
+    fontFamily: "Nunito_700Bold",
+    fontSize: 13,
+    lineHeight: 17,
+  },
+
+  // date pill
+  datePillContainer: {
+    position: "absolute",
+    left: 14,
+    right: 60,
+    zIndex: 10,
+  },
+  datePillText: {
+    color: "rgba(255,255,255,0.88)",
+    fontFamily: "Nunito_700Bold",
+    fontSize: 10,
+    lineHeight: 14,
+  },
+  datePillSep: {
+    color: "rgba(255,255,255,0.28)",
+    fontFamily: "Nunito_700Bold",
+    fontSize: 10,
+    lineHeight: 14,
+  },
+  datePillTodayLabel: {
+    color: "rgba(255,255,255,0.55)",
+    fontFamily: "Nunito_700Bold",
+    fontSize: 10,
+    lineHeight: 14,
+  },
+
+  // repeat
+  miniTaskNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+
+  // deadline
+  deadlineLabel: {
+    ...TYPE.tileMeta,
+    marginTop: 1,
+  },
+  deadlinePicker: {
+    marginTop: 4,
+    borderRadius: 10,
+    overflow: "hidden",
+  },
+  deadlinePickerNav: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 6,
+  },
+  deadlinePickerNavBtn: {
+    width: 32,
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  deadlinePickerNavText: {
+    fontSize: 20,
+    lineHeight: 24,
+    fontFamily: "Nunito_700Bold",
+  },
+  deadlinePickerMonthLabel: {
+    ...TYPE.composerMeta,
+    flex: 1,
+    textAlign: "center",
+  },
+  deadlinePickerDowRow: {
+    flexDirection: "row",
+    marginBottom: 2,
+  },
+  deadlinePickerDow: {
+    flex: 1,
+    textAlign: "center",
+    fontFamily: "Nunito_700Bold",
+    fontSize: 9,
+    lineHeight: 16,
+  },
+  deadlinePickerGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+  },
+  deadlinePickerCell: {
+    width: "14.285%",
+    alignItems: "center",
+    paddingVertical: 2,
+  },
+  deadlinePickerDayInner: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  deadlinePickerTodayRing: {
+    borderWidth: 1.5,
+    borderColor: "currentColor",
+  },
+  deadlinePickerDayText: {
+    fontFamily: "Nunito_700Bold",
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  deadlineClearBtn: {
+    alignSelf: "center",
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    marginTop: 4,
+  },
+  deadlineClearBtnText: {
+    ...TYPE.smallButton,
+  },
+
+  // archive panel header row
+  archivePanelHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    paddingTop: 22,
+    paddingBottom: 10,
+  },
+  archiveAddBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.07)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  archiveBackBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.07)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: -4,
+  },
+
+  // archive list item with swipe-to-delete
+  archiveItemWrap: {
+    position: "relative",
+    overflow: "hidden",
+  },
+  archiveItemDeleteBack: {
+    position: "absolute",
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: ARCHIVE_DELETE_WIDTH,
+    backgroundColor: DANGER,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  archiveItemDeleteBtn: {
+    flex: 1,
+    width: ARCHIVE_DELETE_WIDTH,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  archiveItemFront: {
+    backgroundColor: "#0E0E0E",
+  },
+
+  // archive calendar
+  archiveCalMonthLabel: {
+    flex: 1,
+    color: "#FFFFFF",
+    fontFamily: "Nunito_800ExtraBold",
+    fontSize: 16,
+    lineHeight: 20,
+    marginLeft: 10,
+  },
+  archiveCalNavGroup: {
+    flexDirection: "row",
+    gap: 4,
+  },
+  archiveCalNav: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.07)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  archiveCalBody: {
+    flex: 1,
+    paddingHorizontal: 14,
+    paddingTop: 10,
+  },
+  archiveCalDowRow: {
+    flexDirection: "row",
+    marginBottom: 6,
+  },
+  archiveCalDow: {
+    flex: 1,
+    textAlign: "center",
+    color: "rgba(255,255,255,0.28)",
+    fontFamily: "Nunito_700Bold",
+    fontSize: 10,
+    lineHeight: 18,
+    letterSpacing: 0.4,
+  },
+  archiveCalGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+  },
+  archiveCalCell: {
+    width: "14.285%",
+    alignItems: "center",
+    paddingVertical: 3,
+  },
+  archiveCalDayInner: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  archiveCalDayHasEntry: {
+    backgroundColor: "rgba(255,255,255,0.10)",
+  },
+  archiveCalDayToday: {
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.55)",
+  },
+  archiveCalDayText: {
+    color: "rgba(255,255,255,0.60)",
+    fontFamily: "Nunito_700Bold",
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  archiveCalDayTextHasEntry: {
+    color: "#FFFFFF",
+  },
+  archiveCalDayTextToday: {
+    color: "#FFFFFF",
+  },
+  archiveCalDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#FFE68A",
+    marginTop: 1,
+  },
+
+  // edit conflict overlay
+  editConflictBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.52)",
+    zIndex: 60,
+  },
+  editConflictKeyboard: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "flex-end",
+    zIndex: 70,
+  },
+  editConflictCard: {
+    marginHorizontal: 10,
+    marginBottom: COMPOSER_BOTTOM_GAP,
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 20,
+    shadowColor: INK,
+    shadowOpacity: 0.20,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 8,
+  },
+  editConflictTitle: {
+    fontFamily: "Nunito_800ExtraBold",
+    fontSize: 16,
+    lineHeight: 21,
+    marginBottom: 4,
+  },
+  editConflictSub: {
+    fontFamily: "Nunito_600SemiBold",
+    fontSize: 12,
+    lineHeight: 16,
+    marginBottom: 14,
+  },
+  editConflictOption: {
+    marginBottom: 8,
+  },
+  editConflictOptionInner: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  editConflictOptionLabel: {
+    fontFamily: "Nunito_700Bold",
+    fontSize: 13,
+    lineHeight: 17,
+  },
+  editConflictOptionSub: {
+    fontFamily: "Nunito_600SemiBold",
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: 2,
+  },
+  editConflictCancel: {
+    alignSelf: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginTop: 2,
+  },
+  editConflictCancelText: {
+    fontFamily: "Nunito_700Bold",
+    fontSize: 12,
+    lineHeight: 16,
+  },
+
+  // splash
+  splashOverlay: {
+    zIndex: 100,
+    backgroundColor: APP_SURFACE,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  splashLogo: {
+    overflow: "hidden",
+  },
+  splashRow: {
+    flex: 1,
+    flexDirection: "row",
+  },
+  splashCell: {
+    flex: 1,
   },
 });
